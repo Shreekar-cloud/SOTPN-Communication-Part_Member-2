@@ -24,6 +24,7 @@ public class GossipEngine {
     private String  myDeviceId;
     private boolean isActive = false;
     private Runnable broadcastRunnable;
+    private Runnable stopTimerRunnable;
 
     public interface GossipListener {
         void onConflictDetected(GossipStore.ConflictResult result);
@@ -43,10 +44,6 @@ public class GossipEngine {
         this.handler      = new Handler(Looper.getMainLooper());
     }
 
-    /**
-     * Records a local transaction in the gossip store so conflicts can be detected
-     * against it if other devices broadcast the same token.
-     */
     public void recordLocalSighting(String tokenId, String txId) {
         GossipMessage localMsg = new GossipMessage(
                 tokenId, myDeviceId, txId, System.currentTimeMillis(), 0);
@@ -74,7 +71,10 @@ public class GossipEngine {
             }
         };
         handler.post(broadcastRunnable);
-        handler.postDelayed(this::stopBroadcasting, delayMs);
+
+        // Store the stop timer as a runnable so it can be cancelled
+        stopTimerRunnable = this::stopBroadcasting;
+        handler.postDelayed(stopTimerRunnable, delayMs);
     }
 
     public void stopBroadcasting() {
@@ -83,11 +83,16 @@ public class GossipEngine {
             handler.removeCallbacks(broadcastRunnable);
             broadcastRunnable = null;
         }
+        if (stopTimerRunnable != null) {
+            handler.removeCallbacks(stopTimerRunnable);
+            stopTimerRunnable = null;
+        }
     }
 
     public void shutdown() {
         stopBroadcasting();
-        gossipStore.clearAll();
+        // SOTPN Logic: Do not wipe the store on shutdown. 
+        // Sightings must persist for other concurrent checks.
     }
 
     public void handleIncomingGossip(String rawGossip) {
@@ -126,11 +131,8 @@ public class GossipEngine {
     }
 
     private void broadcastToAll(String gossipWireString) {
-        // Robust broadcasting: one radio failing shouldn't stop the other
         try {
             if (bleManager != null) {
-                // SOTPN FIX: Send full wire string instead of just TokenId
-                // This is required for other peers to detect conflicts accurately.
                 bleManager.broadcastGossip(gossipWireString);
             }
         } catch (Exception e) {
