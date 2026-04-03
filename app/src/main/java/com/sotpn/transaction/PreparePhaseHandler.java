@@ -111,6 +111,10 @@ public class PreparePhaseHandler {
         }
     }
 
+    public Transaction getPendingTransaction() {
+        return pendingTransaction;
+    }
+
     private Transaction buildTransaction(WalletInterface.TokenInfo token,
                                          String receiverPublicKey) {
         String txId      = UUID.randomUUID().toString();
