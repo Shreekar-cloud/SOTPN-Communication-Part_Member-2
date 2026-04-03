@@ -158,6 +158,10 @@ public class TransactionManager implements BleCallback, WifiDirectCallback {
         }
     }
 
+    public Transaction getActiveTransaction() {
+        return activeTransaction;
+    }
+
     public WifiDirectBroadcastReceiver getWifiDirectReceiver() {
         return wifiManager.getReceiver();
     }
