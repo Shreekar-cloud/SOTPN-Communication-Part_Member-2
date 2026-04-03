@@ -15,7 +15,7 @@ import com.sotpn.model.TransactionAck;
 import java.util.List;
 
 /**
- * Top-level Wi-Fi Direct orchestrator for SOTPN Member 2.
+ * SOTPN - Secure Offline Token-Based Payment Network
  */
 public class WifiDirectManager implements WifiDirectCallback {
 
@@ -39,8 +39,12 @@ public class WifiDirectManager implements WifiDirectCallback {
 
         this.p2pManager = (WifiP2pManager)
                 context.getSystemService(Context.WIFI_P2P_SERVICE);
-        this.p2pChannel = p2pManager.initialize(
-                context, Looper.getMainLooper(), null);
+        
+        if (p2pManager != null) {
+            this.p2pChannel = p2pManager.initialize(context, Looper.getMainLooper(), null);
+        } else {
+            this.p2pChannel = null;
+        }
 
         this.receiver = new WifiDirectBroadcastReceiver(p2pManager, p2pChannel, this);
         this.transfer = new WifiDirectTransfer(this);
@@ -49,7 +53,7 @@ public class WifiDirectManager implements WifiDirectCallback {
     public WifiDirectBroadcastReceiver getReceiver() { return receiver; }
 
     public void discoverPeers() {
-        if (p2pManager == null) {
+        if (p2pManager == null || p2pChannel == null) {
             externalCallback.onWiFiDirectError("Wi-Fi Direct not supported");
             return;
         }
@@ -71,6 +75,7 @@ public class WifiDirectManager implements WifiDirectCallback {
     }
 
     public void stopDiscovery() {
+        if (p2pManager == null || p2pChannel == null) return;
         p2pManager.stopPeerDiscovery(p2pChannel, new WifiP2pManager.ActionListener() {
             @Override public void onSuccess() { Log.d(TAG, "Discovery stopped"); }
             @Override public void onFailure(int reason) { }
@@ -78,6 +83,7 @@ public class WifiDirectManager implements WifiDirectCallback {
     }
 
     public void connectToPeer(WifiP2pDevice device) {
+        if (p2pManager == null || p2pChannel == null) return;
         WifiP2pConfig config = new WifiP2pConfig();
         config.deviceAddress = device.deviceAddress;
 
@@ -99,10 +105,12 @@ public class WifiDirectManager implements WifiDirectCallback {
     }
 
     public void disconnect() {
-        p2pManager.removeGroup(p2pChannel, new WifiP2pManager.ActionListener() {
-            @Override public void onSuccess() { Log.d(TAG, "P2P group removed"); }
-            @Override public void onFailure(int r) { Log.w(TAG, "removeGroup failed: " + r); }
-        });
+        if (p2pManager != null && p2pChannel != null) {
+            p2pManager.removeGroup(p2pChannel, new WifiP2pManager.ActionListener() {
+                @Override public void onSuccess() { Log.d(TAG, "P2P group removed"); }
+                @Override public void onFailure(int r) { Log.w(TAG, "removeGroup failed: " + r); }
+            });
+        }
         transfer.stop();
     }
 

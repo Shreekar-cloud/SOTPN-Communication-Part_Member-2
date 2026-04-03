@@ -127,6 +127,15 @@ public class CommitPhaseHandler {
             return;
         }
 
+        // SOTPN SECURITY FIX: Verify ACK comes from the INTENDED receiver
+        if (!ack.getReceiverPublicKey().equals(transaction.getReceiverPublicKey())) {
+            String msg = "ACK receiver identity mismatch — security alert!";
+            Log.e(TAG, msg);
+            transaction.setPhase(TransactionPhase.FAILED);
+            listener.onCommitFailed(transaction.getTxId(), msg);
+            return;
+        }
+
         String ackData = buildAckData(ack.getTxId(), ack.getTokenId());
         boolean ackValid = wallet.verifySignature(
                 ackData, ack.getAckSignature(), ack.getReceiverPublicKey());

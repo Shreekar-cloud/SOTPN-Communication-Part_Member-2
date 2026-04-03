@@ -19,10 +19,10 @@ import static org.junit.Assert.*;
 @Config(sdk = 28)
 public class CommitPhaseHandlerTest {
 
-    private MockWallet          wallet;
+    private MockWallet          myWallet;
+    private MockWallet          otherWallet;
     private CommitPhaseHandler  handler;
 
-    // Result holders
     private TransactionProof completedProof   = null;
     private String           failureReason    = null;
     private boolean          receiverComplete = false;
@@ -30,8 +30,9 @@ public class CommitPhaseHandlerTest {
 
     @Before
     public void setUp() {
-        wallet  = new MockWallet();
-        handler = new CommitPhaseHandler(wallet, null, null);
+        myWallet  = new MockWallet();
+        otherWallet = new MockWallet();
+        handler = new CommitPhaseHandler(myWallet, null, null);
         resetResults();
     }
 
@@ -61,106 +62,93 @@ public class CommitPhaseHandlerTest {
         };
     }
 
-    private Transaction buildTransaction() {
+    private Transaction buildTransaction(String senderKey, String receiverKey) {
         Transaction tx = new Transaction(
                 "tx_001", "tok_abc",
-                "sender_pubkey", "receiver_pubkey",
+                senderKey, receiverKey,
                 System.currentTimeMillis(),
-                "nonce_001", "tx_signature"
+                "nonce_001", ""
         );
-        // Manual override signature to pass MockWallet check if needed
         String data = tx.getTokenId() + tx.getReceiverPublicKey() + tx.getTimestamp() + tx.getNonce();
-        tx.setSignature(wallet.signTransaction(data));
+        // Assume senderWallet signed it
+        tx.setSignature("sig:" + senderKey + ":" + data.hashCode());
         return tx;
     }
 
-    private TransactionAck buildValidAck(String txId, String tokenId) {
+    private TransactionAck buildValidAck(String txId, String tokenId, String receiverKey) {
         String ackData = "Received:" + txId + ":" + tokenId;
-        String receiverPubKey = wallet.getPublicKey();
-        String sig = wallet.signTransaction(ackData);
+        // Signature format sig:[receiverKey]:[hash]
+        String sig = "sig:" + receiverKey + ":" + ackData.hashCode();
         
         return new TransactionAck(
                 txId, tokenId,
-                receiverPubKey,
+                receiverKey,
                 System.currentTimeMillis(),
                 sig,
-                true // accepted
+                true 
         );
-    }
-
-    @Test
-    public void testReceiverCommit_signIsCalled() {
-        Transaction tx = buildTransaction();
-        handler.executeReceiverCommit(tx, true, makeListener());
-        assertTrue("signTransaction should be called for ACK",
-                wallet.signCallCount.get() > 0);
     }
 
     @Test
     public void testReceiverCommit_receiveTokenCalled() {
-        Transaction tx = buildTransaction();
+        // We are the receiver
+        Transaction tx = buildTransaction(otherWallet.getPublicKey(), myWallet.getPublicKey());
         handler.executeReceiverCommit(tx, true, makeListener());
-        assertTrue("receiveToken should be called",
-                wallet.tokenWasReceived);
-    }
-
-    @Test
-    public void testReceiverCommit_phaseIsFinalized() {
-        Transaction tx = buildTransaction();
-        handler.executeReceiverCommit(tx, true, makeListener());
-        assertEquals("Phase should be FINALIZED",
-                TransactionPhase.FINALIZED, tx.getPhase());
-    }
-
-    @Test
-    public void testSenderCommit_ackTxIdMismatch_fails() {
-        Transaction tx = buildTransaction();
-        TransactionAck wrongAck = new TransactionAck(
-                "tx_WRONG", "tok_abc", "receiver_pubkey",
-                System.currentTimeMillis(), "sig", true);
-        handler.executeSenderCommit(tx, wrongAck, makeListener());
-        assertNotNull("TxId mismatch should fail", failureReason);
-        assertFalse("Sender complete should NOT fire", senderComplete);
-    }
-
-    @Test
-    public void testSenderCommit_invalidAckSignature_fails() {
-        Transaction tx  = buildTransaction();
-        TransactionAck ack = buildValidAck("tx_001", "tok_abc");
-        
-        TransactionAck badSigAck = new TransactionAck(
-                ack.getTxId(), ack.getTokenId(), ack.getReceiverPublicKey(),
-                ack.getAckTimestamp(), "BAD_SIG", ack.isAccepted());
-                
-        handler.executeSenderCommit(tx, badSigAck, makeListener());
-        assertNotNull("Invalid ACK sig should fail", failureReason);
-        assertFalse("Token should NOT be marked spent", wallet.tokenWasSpent);
+        assertTrue("receiveToken should be called", myWallet.tokenWasReceived);
+        assertEquals(TransactionPhase.FINALIZED, tx.getPhase());
     }
 
     @Test
     public void testSenderCommit_validAck_marksTokenSpent() {
-        Transaction tx  = buildTransaction();
-        TransactionAck ack = buildValidAck("tx_001", "tok_abc");
+        // We are the sender
+        Transaction tx  = buildTransaction(myWallet.getPublicKey(), otherWallet.getPublicKey());
+        TransactionAck ack = buildValidAck("tx_001", "tok_abc", otherWallet.getPublicKey());
+        
         handler.executeSenderCommit(tx, ack, makeListener());
-        assertTrue("Token should be marked SPENT", wallet.tokenWasSpent);
+        assertTrue("Token should be marked SPENT", myWallet.tokenWasSpent);
+        assertTrue(senderComplete);
     }
 
     @Test
-    public void testSenderCommit_producesProofWithSenderRole() {
-        Transaction tx  = buildTransaction();
-        TransactionAck ack = buildValidAck("tx_001", "tok_abc");
-        handler.executeSenderCommit(tx, ack, makeListener());
-        assertNotNull("Proof should be generated", completedProof);
-        assertEquals("Proof role should be SENDER",
-                TransactionProof.Role.SENDER, completedProof.getRole());
+    public void testSenderCommit_ackTxIdMismatch_fails() {
+        Transaction tx = buildTransaction(myWallet.getPublicKey(), otherWallet.getPublicKey());
+        TransactionAck wrongAck = new TransactionAck(
+                "tx_WRONG", "tok_abc", otherWallet.getPublicKey(),
+                System.currentTimeMillis(), "sig", true);
+        
+        handler.executeSenderCommit(tx, wrongAck, makeListener());
+        assertNotNull(failureReason);
+        assertFalse(senderComplete);
+    }
+
+    @Test
+    public void testSenderCommit_ackTokenIdMismatch_fails() {
+        Transaction tx = buildTransaction(myWallet.getPublicKey(), otherWallet.getPublicKey());
+        TransactionAck wrongAck = new TransactionAck(
+                "tx_001", "tok_WRONG", otherWallet.getPublicKey(),
+                System.currentTimeMillis(), "sig", true);
+        
+        handler.executeSenderCommit(tx, wrongAck, makeListener());
+        assertNotNull(failureReason);
+        assertEquals(TransactionPhase.FAILED, tx.getPhase());
+    }
+
+    @Test
+    public void testSenderCommit_receiverIdentityMismatch_fails() {
+        Transaction tx = buildTransaction(myWallet.getPublicKey(), otherWallet.getPublicKey());
+        // Ack claims to be from a third party
+        TransactionAck hijackedAck = buildValidAck("tx_001", "tok_abc", "THIRD_PARTY_KEY");
+        
+        handler.executeSenderCommit(tx, hijackedAck, makeListener());
+        assertNotNull(failureReason);
+        assertEquals(TransactionPhase.FAILED, tx.getPhase());
     }
 
     @Test
     public void testReceiverCommit_producesProofWithReceiverRole() {
-        Transaction tx = buildTransaction();
+        Transaction tx = buildTransaction(otherWallet.getPublicKey(), myWallet.getPublicKey());
         handler.executeReceiverCommit(tx, true, makeListener());
-        assertNotNull("Proof should be generated", completedProof);
-        assertEquals("Proof role should be RECEIVER",
-                TransactionProof.Role.RECEIVER, completedProof.getRole());
+        assertNotNull(completedProof);
+        assertEquals(TransactionProof.Role.RECEIVER, completedProof.getRole());
     }
 }

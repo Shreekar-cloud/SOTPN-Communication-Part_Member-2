@@ -33,9 +33,7 @@ public class CommitAmbiguityTest {
     public void setUp() {
         receiverWallet = new MockWallet();
         senderWallet = new MockWallet();
-        Context context = RuntimeEnvironment.getApplication();
-        TransactionManager.TransactionListener listener = mock(TransactionManager.TransactionListener.class);
-        receiverManager = new TransactionManager(context, receiverWallet, listener);
+        receiverManager = new TransactionManager(RuntimeEnvironment.getApplication(), receiverWallet, mock(TransactionManager.TransactionListener.class));
         
         tx = new Transaction("tx_retried_123", "tok_1", senderWallet.getPublicKey(), receiverWallet.getPublicKey(), 
                              System.currentTimeMillis(), "nonce_retried", "");
