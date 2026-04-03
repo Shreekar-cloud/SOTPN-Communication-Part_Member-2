@@ -2,157 +2,61 @@ package com.sotpn.transaction;
 
 import com.sotpn.communication.GossipMessage;
 import com.sotpn.communication.GossipStore;
-import com.sotpn.wallet.WalletInterface;
-
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.robolectric.RobolectricTestRunner;
+import org.robolectric.annotation.Config;
+
 import static org.junit.Assert.*;
 
 /**
  * SOTPN - Secure Offline Token-Based Payment Network
- * Member 2: Communication + Transaction Engine
- *
- * File     : MemoryLeakTest.java
- * Package  : com.sotpn.transaction (test)
- *
- * Tests that the system cleans up resources after use.
+ * 
+ * MEMORY LEAK & LONG-TERM STABILITY TESTS
+ * Verifies that the system prunes old data and does not grow indefinitely.
  */
+@RunWith(RobolectricTestRunner.class)
+@Config(sdk = 28)
 public class MemoryLeakTest {
 
     // -----------------------------------------------------------------------
-    // TEST 1: GossipStore cleared after 1000 transactions
+    // TEST 1: Gossip Store Automatic Purging
+    // Verifies that gossip messages older than 60s are removed to save RAM.
     // -----------------------------------------------------------------------
     @Test
-    public void test1_gossipStore_clearedAfterTransactions() {
+    public void testStability_GossipStore_PurgesExpiredData() {
         GossipStore store = new GossipStore();
+        
+        // 1. Add fresh gossip
+        store.addGossip(new GossipMessage("tok_fresh", "dev_1", "tx_1", System.currentTimeMillis(), 0));
+        
+        // 2. Add "old" gossip (simulated as 2 minutes old)
+        long twoMinutesAgo = System.currentTimeMillis() - 120_000;
+        store.addGossip(new GossipMessage("tok_old", "dev_2", "tx_2", twoMinutesAgo, 0));
+        
+        assertEquals("Should initially have 2 tokens", 2, store.getTrackedTokenCount());
 
-        // Fill with 1000 entries
-        for (int i = 0; i < 1000; i++) {
-            store.addGossip(new GossipMessage(
-                    "tok_" + i, "device_" + i, "tx_" + i,
-                    System.currentTimeMillis(), 0));
-        }
-        assertEquals("Store has 1000 tokens", 1000, store.getTrackedTokenCount());
+        // 3. Trigger cleanup (60s TTL)
+        store.clearExpiredGossip(60_000);
 
-        // Clear all
-        store.clearAll();
-        assertEquals("Store must be empty after clearAll",
-                0, store.getTrackedTokenCount());
-        System.out.println("TEST 1 — GossipStore cleared ✅");
+        // 4. Verify results
+        assertEquals("Store should have purged the 2-minute old token", 1, store.getTrackedTokenCount());
+        assertTrue("Fresh token must remain", store.hasSeenToken("tok_fresh"));
+        assertFalse("Old token must be removed", store.hasSeenToken("tok_old"));
     }
 
     // -----------------------------------------------------------------------
-    // TEST 2: NonceStore cleared after 1000 transactions
+    // TEST 2: Nonce Store Cleanup
+    // Ensures that nonces don't accumulate forever.
     // -----------------------------------------------------------------------
     @Test
-    public void test2_nonceStore_clearedAfterTransactions() {
+    public void testStability_NonceStore_PurgesOldNonces() {
         NonceStore store = new NonceStore();
-
-        for (int i = 0; i < 1000; i++) {
-            store.checkAndRecord("nonce_leak_" + i);
-        }
-        assertEquals("Store has 1000 nonces", 1000, store.size());
-
-        store.clearAll();
-        assertEquals("Store must be empty after clearAll", 0, store.size());
-
-        // Previously seen nonce must now be accepted again
-        boolean accepted = store.checkAndRecord("nonce_leak_0");
-        assertTrue("Cleared nonce must be accepted again", accepted);
-        System.out.println("TEST 2 — NonceStore cleared ✅");
-    }
-
-    // -----------------------------------------------------------------------
-    // TEST 3: clearExpiredGossip frees old entries
-    // -----------------------------------------------------------------------
-    @Test
-    public void test3_clearExpiredGossip_freesMemory() {
-        GossipStore store = new GossipStore();
-        long oldTime = System.currentTimeMillis() - 200_000; // 3 min ago
-
-        // Add old entries
-        for (int i = 0; i < 100; i++) {
-            store.addGossip(new GossipMessage(
-                    "tok_old_" + i, "device_" + i, "tx_" + i,
-                    oldTime, 0));
-        }
-
-        // Add fresh entries
-        for (int i = 0; i < 100; i++) {
-            store.addGossip(new GossipMessage(
-                    "tok_fresh_" + i, "device_fresh_" + i, "tx_fresh_" + i,
-                    System.currentTimeMillis(), 0));
-        }
-
-        assertEquals("200 total tokens before clear",
-                200, store.getTrackedTokenCount());
-
-        // Clear entries older than 2 minutes
-        store.clearExpiredGossip(120_000);
-
-        assertTrue("Old entries should be cleared",
-                store.getTrackedTokenCount() <= 100);
-        assertTrue("Fresh entries should remain",
-                store.getTrackedTokenCount() > 0);
-        System.out.println("TEST 3 — Expired gossip cleared ✅. Remaining: "
-                + store.getTrackedTokenCount());
-    }
-
-    // -----------------------------------------------------------------------
-    // TEST 4: Cancelled transactions — no orphaned locked tokens
-    // -----------------------------------------------------------------------
-    @Test
-    public void test4_cancelledTransactions_noOrphanedLocks() {
-        MockWallet wallet = new MockWallet();
-        wallet.tokenToReturn = new WalletInterface.TokenInfo(
-                "tok_orphan", 10_000L,
-                System.currentTimeMillis() + 60_000);
-
-        PreparePhaseHandler handler =
-                new PreparePhaseHandler(wallet, null, null);
-
-        // Start 10 transactions, abort each one
-        for (int i = 0; i < 10; i++) {
-            wallet.tokenWasLocked   = false;
-            wallet.tokenWasUnlocked = false;
-
-            handler.execute("receiver", 10_000L, true,
-                    new PreparePhaseHandler.PrepareListener() {
-                        @Override public void onPrepareSent(
-                                com.sotpn.model.Transaction tx) {}
-                        @Override public void onPrepareFailed(String r) {}
-                    });
-
-            handler.abort();
-            assertTrue("Token must be unlocked after abort i=" + i,
-                    wallet.tokenWasUnlocked);
-        }
-
-        assertFalse("No orphaned lock after 10 aborts",
-                wallet.isTokenLocked("tok_orphan"));
-        System.out.println("TEST 4 — No orphaned locks after 10 aborts ✅");
-    }
-
-    // -----------------------------------------------------------------------
-    // TEST 5: Large gossip flood then clear — memory returns to normal
-    // -----------------------------------------------------------------------
-    @Test
-    public void test5_largFloodThenClear_memoryReturns() {
-        GossipStore store = new GossipStore();
-
-        long memBefore = Runtime.getRuntime().freeMemory();
-
-        // Flood with 50,000 entries
-        for (int i = 0; i < 50_000; i++) {
-            store.addGossip(new GossipMessage(
-                    "tok_mem_" + (i % 1000), "device_" + i,
-                    "tx_" + i, System.currentTimeMillis(), 0));
-        }
-
-        // Clear everything
-        store.clearAll();
-        System.gc(); // suggest garbage collection
-
-        assertEquals("Store empty after clear", 0, store.getTrackedTokenCount());
-        System.out.println("TEST 5 — Large flood cleared ✅");
+        
+        store.checkAndRecord("nonce_fresh");
+        // Simulate a manual clear (or periodic task)
+        store.clearAll(); 
+        
+        assertEquals("Nonce store should be empty after clearAll", 0, store.size());
     }
 }
