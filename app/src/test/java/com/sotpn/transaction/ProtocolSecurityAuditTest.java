@@ -19,8 +19,6 @@ import static org.mockito.Mockito.*;
 
 /**
  * SOTPN - Secure Offline Token-Based Payment Network
- * 
- * CRITICAL PROTOCOL SECURITY AUDIT
  */
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk = 28)

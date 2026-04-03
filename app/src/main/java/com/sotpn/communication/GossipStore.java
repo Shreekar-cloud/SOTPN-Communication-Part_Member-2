@@ -39,8 +39,6 @@ public class GossipStore {
     }
 
     private String getDedupKey(GossipMessage message) {
-        // Dedup key is Token + Device + TxId to allow SAME device to send SAME Tx multiple times (as relay)
-        // but DIFFERENT TxIds from same device for same token is a conflict.
         return message.getTokenId() + "_" + message.getSenderDeviceId() + "_" + message.getTxId();
     }
 
@@ -52,9 +50,7 @@ public class GossipStore {
 
         for (int i = 1; i < sightings.size(); i++) {
             GossipMessage other = sightings.get(i);
-            // CONFLICT logic:
-            // 1. Same Token, Different Transaction IDs -> Double Spend
-            // 2. Same Token, Same Tx ID, Different Originators -> Identity Spoofing
+            // SOTPN SECURITY FIX: Conflict if DIFFERENT TxId OR DIFFERENT Sender for same TxId (Identity spoofing)
             if (!other.getTxId().equals(first.getTxId()) || !other.getSenderDeviceId().equals(first.getSenderDeviceId())) {
                 return new ConflictResult(true, tokenId, first.getTxId(), other.getTxId(), 
                                          first.getSenderDeviceId(), other.getSenderDeviceId());

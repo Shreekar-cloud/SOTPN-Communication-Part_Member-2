@@ -56,17 +56,22 @@ public class AdvancedProtocolSecurityTest {
 
     @Test
     public void testAudit_Sender_RejectsAckWithWrongTokenId() {
-        // Start a send from our manager
+        // manager starts as SENDER
         myWallet.tokenToReturn = new com.sotpn.wallet.WalletInterface.TokenInfo("tok_correct", 1000L, System.currentTimeMillis() + 60000);
         manager.startSend("receiver_key", 1000L);
         ShadowLooper.idleMainLooper();
-        
         Transaction active = manager.getActiveTransaction();
         assertNotNull(active);
 
-        // Receive ACK for correct TxId but WRONG tokenId
-        TransactionAck maliciousAck = new TransactionAck(active.getTxId(), "WRONG_TOKEN_ID", 
-                                                         "receiver_key", System.currentTimeMillis(), "sig", true);
+        // Receiver sends ACK for the correct txId but WRONG tokenId
+        String txId = active.getTxId();
+        String wrongToken = "WRONG_TOKEN_ID";
+        String receiverKey = "receiver_key";
+        String ackData = "Received:" + txId + ":" + wrongToken;
+        String maliciousSig = "sig:" + receiverKey + ":" + ackData.hashCode();
+
+        TransactionAck maliciousAck = new TransactionAck(txId, wrongToken, 
+                                                         receiverKey, System.currentTimeMillis(), maliciousSig, true);
         
         manager.onAckReceived(maliciousAck);
         ShadowLooper.idleMainLooper();
@@ -81,9 +86,10 @@ public class AdvancedProtocolSecurityTest {
         String tokenId = "tok_1";
         String txId = "tx_shared";
         
+        // 1. Device A reports originating Tx_shared
         store.addGossip(new com.sotpn.communication.GossipMessage(tokenId, "device_A", txId, System.currentTimeMillis(), 0));
         
-        // Same TxId from DIFFERENT device
+        // 2. Device B reports originating the SAME TxId (Collision/Spoofing)
         com.sotpn.communication.GossipStore.ConflictResult result = 
             store.addGossip(new com.sotpn.communication.GossipMessage(tokenId, "device_B", txId, System.currentTimeMillis(), 0));
 
