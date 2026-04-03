@@ -129,7 +129,9 @@ public class GossipEngine {
         // Robust broadcasting: one radio failing shouldn't stop the other
         try {
             if (bleManager != null) {
-                bleManager.broadcastGossip(extractTokenId(gossipWireString));
+                // SOTPN FIX: Send full wire string instead of just TokenId
+                // This is required for other peers to detect conflicts accurately.
+                bleManager.broadcastGossip(gossipWireString);
             }
         } catch (Exception e) {
             Log.e(TAG, "BLE gossip broadcast failed", e);

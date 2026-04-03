@@ -9,16 +9,29 @@ import java.util.Map;
 
 /**
  * SOTPN - Secure Offline Token-Based Payment Network
+ * Member 2: Communication + Transaction Engine
  */
 public class GossipStore {
 
     private static final String TAG = "GossipStore";
+    private static final long MAX_FUTURE_SKEW_MS = 10_000; // 10 seconds allowance
 
     private final Map<String, List<GossipMessage>> tokenGossipMap = new HashMap<>();
     private final Map<String, Long> processedKeys = new HashMap<>();
 
+    /**
+     * Add a received gossip message to the store with DoS protection.
+     */
     public synchronized ConflictResult addGossip(GossipMessage message) {
+        // 1. Deduplication
         if (hasProcessed(message)) {
+            return ConflictResult.NO_CONFLICT;
+        }
+
+        // 2. DoS Protection: Reject messages from the future to prevent RAM bloat
+        long now = System.currentTimeMillis();
+        if (message.getTimestampMs() > now + MAX_FUTURE_SKEW_MS) {
+            Log.w(TAG, "Rejected gossip from the future: " + message.getTimestampMs() + " (now=" + now + ")");
             return ConflictResult.NO_CONFLICT;
         }
 
