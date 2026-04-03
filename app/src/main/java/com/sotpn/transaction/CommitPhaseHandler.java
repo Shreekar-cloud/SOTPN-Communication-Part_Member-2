@@ -12,11 +12,6 @@ import com.sotpn.wallet.WalletInterface;
 /**
  * SOTPN - Secure Offline Token-Based Payment Network
  * Member 2: Communication + Transaction Engine
- *
- * File     : CommitPhaseHandler.java
- * Package  : com.sotpn.transaction
- * Step     : Step 7 - Commit Phase Handler
- * Status   : Complete (Fixed - direct callbacks for testability)
  */
 public class CommitPhaseHandler {
 
@@ -40,15 +35,22 @@ public class CommitPhaseHandler {
         this.wifiManager = wifiManager;
     }
 
-    // -----------------------------------------------------------------------
-    // RECEIVER SIDE
-    // -----------------------------------------------------------------------
-
     public void executeReceiverCommit(Transaction transaction,
                                       boolean useBle,
                                       CommitListener listener) {
         Log.i(TAG, "Phase 4 COMMIT (RECEIVER) txId: " + transaction.getTxId());
         transaction.setPhase(TransactionPhase.COMMITTING);
+
+        // SOTPN SECURITY FIX: Re-verify token validity immediately before commit.
+        // This prevents accepting tokens that expired during the 10s Adaptive Delay.
+        long now = System.currentTimeMillis();
+        if (now - transaction.getTimestamp() > 60_000) {
+            String msg = "Token expired during safety delay window";
+            Log.e(TAG, msg);
+            transaction.setPhase(TransactionPhase.FAILED);
+            listener.onCommitFailed(transaction.getTxId(), msg);
+            return;
+        }
 
         // Sign the ACK
         String ackData = buildAckData(transaction.getTxId(), transaction.getTokenId());
@@ -96,17 +98,11 @@ public class CommitPhaseHandler {
             Log.e(TAG, "receiveToken() failed — continuing", e);
         }
 
-        // Build proof and finalize
         TransactionProof proof = buildProof(transaction, ackSignature,
                 TransactionProof.Role.RECEIVER);
         transaction.setPhase(TransactionPhase.FINALIZED);
-        Log.i(TAG, "Phase 4 COMMIT complete (RECEIVER)");
         listener.onReceiverCommitComplete(proof);
     }
-
-    // -----------------------------------------------------------------------
-    // SENDER SIDE
-    // -----------------------------------------------------------------------
 
     public void executeSenderCommit(Transaction transaction,
                                     TransactionAck ack,
@@ -114,17 +110,14 @@ public class CommitPhaseHandler {
         Log.i(TAG, "Phase 4 COMMIT (SENDER) txId: " + transaction.getTxId());
         transaction.setPhase(TransactionPhase.COMMITTING);
 
-        // Check txId match
         if (!ack.getTxId().equals(transaction.getTxId())) {
-            String msg = "ACK txId mismatch — expected: " + transaction.getTxId()
-                    + " got: " + ack.getTxId();
+            String msg = "ACK txId mismatch";
             Log.e(TAG, msg);
             transaction.setPhase(TransactionPhase.FAILED);
             listener.onCommitFailed(transaction.getTxId(), msg);
             return;
         }
 
-        // Verify ACK signature
         String ackData = buildAckData(ack.getTxId(), ack.getTokenId());
         boolean ackValid = wallet.verifySignature(
                 ackData, ack.getAckSignature(), ack.getReceiverPublicKey());
@@ -137,7 +130,6 @@ public class CommitPhaseHandler {
             return;
         }
 
-        // Mark token spent
         String proofStr = buildProofString(transaction, ack.getAckSignature());
         try {
             wallet.markTokenSpent(transaction.getTokenId(), proofStr);
@@ -149,31 +141,20 @@ public class CommitPhaseHandler {
             return;
         }
 
-        // Build proof and finalize
         TransactionProof proof = buildProof(transaction, ack.getAckSignature(),
                 TransactionProof.Role.SENDER);
         transaction.setPhase(TransactionPhase.FINALIZED);
-        Log.i(TAG, "Phase 4 COMMIT complete (SENDER)");
         listener.onSenderCommitComplete(proof);
     }
 
-    // -----------------------------------------------------------------------
-    // Rejection
-    // -----------------------------------------------------------------------
-
     public void sendRejection(Transaction transaction, String reason, boolean useBle) {
-        Log.w(TAG, "Sending REJECTION txId: " + transaction.getTxId());
         try {
-            String rejectData = "REJECTED:" + transaction.getTxId()
-                    + ":" + transaction.getTokenId();
+            String rejectData = "REJECTED:" + transaction.getTxId() + ":" + transaction.getTokenId();
             String rejectSignature = wallet.signTransaction(rejectData);
             TransactionAck rejection = new TransactionAck(
-                    transaction.getTxId(),
-                    transaction.getTokenId(),
-                    wallet.getPublicKey(),
-                    System.currentTimeMillis(),
-                    rejectSignature,
-                    false
+                    transaction.getTxId(), transaction.getTokenId(),
+                    wallet.getPublicKey(), System.currentTimeMillis(),
+                    rejectSignature, false
             );
             if (useBle && bleManager != null) {
                 bleManager.sendAck(rejection);
@@ -181,13 +162,9 @@ public class CommitPhaseHandler {
                 wifiManager.sendAck(rejection);
             }
         } catch (Exception e) {
-            Log.e(TAG, "Failed to send rejection: " + e.getMessage(), e);
+            Log.e(TAG, "Failed to send rejection", e);
         }
     }
-
-    // -----------------------------------------------------------------------
-    // Helpers
-    // -----------------------------------------------------------------------
 
     private String buildAckData(String txId, String tokenId) {
         return "Received:" + txId + ":" + tokenId;
