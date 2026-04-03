@@ -34,7 +34,14 @@ public class ArchitecturalSafetyAuditTest {
     public void setUp() {
         wallet = new MockWallet();
         Context context = RuntimeEnvironment.getApplication();
-        manager = new TransactionManager(context, wallet, mock(TransactionManager.TransactionListener.class));
+        TransactionManager.TransactionListener listener = mock(TransactionManager.TransactionListener.class);
+        manager = new TransactionManager(context, wallet, listener);
+    }
+
+    private void signTransaction(Transaction tx, String senderKey) {
+        String data = tx.getTokenId() + tx.getReceiverPublicKey() + tx.getTimestamp() + tx.getNonce();
+        // Mimic MockWallet signature format: sig:[signerPublicKey]:[dataHash]
+        tx.setSignature("sig:" + senderKey + ":" + data.hashCode());
     }
 
     // -----------------------------------------------------------------------
@@ -44,8 +51,10 @@ public class ArchitecturalSafetyAuditTest {
     // -----------------------------------------------------------------------
     @Test
     public void testAudit_GossipConflictDuringDelay_AbortsHappyPath() {
-        Transaction tx = new Transaction("tx_audit", "tok_audit", "s", wallet.getPublicKey(), 
-                                         System.currentTimeMillis(), "n", "s");
+        String senderKey = "sender_key";
+        Transaction tx = new Transaction("tx_audit", "tok_audit", senderKey, wallet.getPublicKey(), 
+                                         System.currentTimeMillis(), "n", "");
+        signTransaction(tx, senderKey);
         
         // Start incoming transaction (reaches Phase 3 DELAYING)
         manager.onTransactionReceived(tx);
@@ -54,10 +63,8 @@ public class ArchitecturalSafetyAuditTest {
 
         // Simulate conflict arriving at T+5s
         ShadowLooper.idleMainLooper(5, TimeUnit.SECONDS);
-        GossipStore.ConflictResult conflict = new GossipStore.ConflictResult(
-                true, "tok_audit", "tx_audit", "tx_evil", "s1", "s2");
         
-        // This triggers the handleConflict logic
+        // This triggers the handleConflict logic via public callback
         manager.onGossipReceived("TOKEN_SEEN:tok_audit:dev_evil:tx_evil:" + System.currentTimeMillis() + ":0");
         ShadowLooper.idleMainLooper();
 
@@ -77,8 +84,12 @@ public class ArchitecturalSafetyAuditTest {
     // -----------------------------------------------------------------------
     @Test
     public void testAudit_InterRadioCollision_IsTreatedAsFraud() {
-        Transaction tx1 = new Transaction("tx_1", "tok_race", wallet.getPublicKey(), "r", System.currentTimeMillis(), "n1", "s1");
-        Transaction tx2 = new Transaction("tx_2", "tok_race", wallet.getPublicKey(), "r", System.currentTimeMillis(), "n2", "s2");
+        String senderKey1 = "s1";
+        String senderKey2 = "s2";
+        Transaction tx1 = new Transaction("tx_1", "tok_race", senderKey1, wallet.getPublicKey(), System.currentTimeMillis(), "n1", "");
+        Transaction tx2 = new Transaction("tx_2", "tok_race", senderKey2, wallet.getPublicKey(), System.currentTimeMillis(), "n2", "");
+        signTransaction(tx1, senderKey1);
+        signTransaction(tx2, senderKey2);
 
         // 1. Receive via WiFi
         manager.onTransactionReceived(tx1);
