@@ -1,9 +1,7 @@
 package com.sotpn.transaction;
 
-import com.sotpn.communication.GossipStore;
 import com.sotpn.model.Transaction;
 import com.sotpn.model.TransactionPhase;
-import com.sotpn.wallet.WalletInterface;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -102,7 +100,7 @@ public class AbstractConfigTest {
     @Test
     public void test7_transactionPhase_allStatesExist() {
         TransactionPhase[] phases = TransactionPhase.values();
-        // SOTPN Current Implementation has exactly 6 phases: PREPARE, VALIDATING, DELAYING, COMMITTING, FINALIZED, FAILED
+        // SOTPN Current Implementation has exactly 6 phases
         assertEquals("Protocol must have exactly 6 phases", 6, phases.length);
         
         assertNotNull(TransactionPhase.PREPARE);
