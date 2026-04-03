@@ -2,6 +2,7 @@ package com.sotpn.transaction;
 
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.util.Log;
 
 import com.sotpn.communication.BleManager;
@@ -14,11 +15,6 @@ import com.sotpn.model.TransactionPhase;
 /**
  * SOTPN - Secure Offline Token-Based Payment Network
  * Member 2: Communication + Transaction Engine
- *
- * File     : AdaptiveDelayHandler.java
- * Package  : com.sotpn.transaction
- * Step     : Step 6 - Adaptive Delay Calculator
- * Status   : Complete
  */
 public class AdaptiveDelayHandler implements GossipEngine.GossipListener {
 
@@ -62,14 +58,14 @@ public class AdaptiveDelayHandler implements GossipEngine.GossipListener {
         this.activeTransaction = transaction;
         this.listener          = listener;
         this.isRunning         = true;
-        this.startTimeMs       = System.currentTimeMillis();
+        this.startTimeMs       = SystemClock.elapsedRealtime();
 
         int nearbyCount = bleManager.getNearbyDeviceCount();
         this.delayMs    = calculator.calculateDelayMs(nearbyCount);
 
         AdaptiveDelayCalculator.RiskLevel risk = calculator.getRiskLevel(nearbyCount);
 
-        Log.i(TAG, "▶ Phase 3 ADAPTIVE DELAY started");
+        Log.i(TAG, "▶ Phase 3 ADAPTIVE DELAY started | Duration: " + delayMs + "ms");
 
         transaction.setPhase(TransactionPhase.DELAYING);
 
@@ -89,7 +85,7 @@ public class AdaptiveDelayHandler implements GossipEngine.GossipListener {
             @Override
             public void run() {
                 if (!isRunning) return;
-                long elapsed   = System.currentTimeMillis() - startTimeMs;
+                long elapsed   = SystemClock.elapsedRealtime() - startTimeMs;
                 long remaining = Math.max(0, delayMs - elapsed);
 
                 listener.onDelayProgress(remaining, delayMs, risk);
@@ -152,7 +148,7 @@ public class AdaptiveDelayHandler implements GossipEngine.GossipListener {
 
     public long getRemainingMs() {
         if (!isRunning) return 0;
-        long elapsed = System.currentTimeMillis() - startTimeMs;
+        long elapsed = SystemClock.elapsedRealtime() - startTimeMs;
         return Math.max(0, delayMs - elapsed);
     }
 }
