@@ -13,9 +13,6 @@ import java.util.concurrent.atomic.AtomicInteger;
  *
  * File     : MockWallet.java
  * Package  : com.sotpn.transaction (test)
- *
- * -----------------------------------------------------------------------
- * Thread-Safe cryptographically aware mock for end-to-end testing.
  */
 public class MockWallet implements WalletInterface {
 
@@ -92,7 +89,11 @@ public class MockWallet implements WalletInterface {
     @Override
     public String signTransaction(String dataToSign) {
         signCallCount.incrementAndGet();
-        if (!signShouldSucceed) return "";
+        if (!signShouldSucceed) {
+            // Throwing exception simulates real-world wallet failures (e.g. Keystore locked)
+            // and allows PreparePhaseHandler to trigger the rollback logic correctly.
+            throw new RuntimeException("Wallet signing failed");
+        }
         // Deterministic signature based on OUR identity and the data
         return "sig:" + publicKey + ":" + dataToSign.hashCode();
     }

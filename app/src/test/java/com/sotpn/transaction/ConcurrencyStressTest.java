@@ -348,6 +348,7 @@ public class ConcurrencyStressTest {
             final int txIndex = i;
             executor.submit(() -> {
                 try {
+                    // Each transaction has its own isolated wallet + store
                     MockWallet sender   = new MockWallet();
                     MockWallet receiver = new MockWallet();
                     sender.tokenToReturn = new WalletInterface.TokenInfo(
@@ -363,8 +364,8 @@ public class ConcurrencyStressTest {
 
                     PreparePhaseHandler    prepare    = new PreparePhaseHandler(sender, mock(BleManager.class), mock(WifiDirectManager.class));
                     ValidationPhaseHandler validate   = new ValidationPhaseHandler(receiver, ns, ge);
-                    CommitPhaseHandler     recCommit  = new CommitPhaseHandler(receiver, mock(BleManager.class), mock(WifiDirectManager.class));
-                    CommitPhaseHandler     sendCommit = new CommitPhaseHandler(sender, mock(BleManager.class), mock(WifiDirectManager.class));
+                    CommitPhaseHandler     recCommit  = new CommitPhaseHandler(receiver, null, null);
+                    CommitPhaseHandler     sendCommit = new CommitPhaseHandler(sender, null, null);
 
                     final Transaction[]      sentTx = {null};
                     final Transaction[]      validTx = {null};
@@ -500,6 +501,37 @@ public class ConcurrencyStressTest {
                 acceptedNonces.size(), nonceStore.size());
         assertEquals("All unique nonces should be accepted",
                 DEVICE_COUNT, nonceStore.size());
+    }
+
+    // -----------------------------------------------------------------------
+    // TEST 11: 1,000 concurrent aborts — ensures thread-safe unlocking
+    // -----------------------------------------------------------------------
+    @Test
+    public void test11_thousandConcurrentAborts_noLockLeaks() 
+            throws InterruptedException {
+        
+        ExecutorService executor = Executors.newFixedThreadPool(THREAD_POOL_SIZE);
+        CountDownLatch latch = new CountDownLatch(1000);
+        
+        ConcurrentMockWallet wallet = new ConcurrentMockWallet("tok_abort_test");
+        PreparePhaseHandler handler = new PreparePhaseHandler(wallet, null, null);
+
+        for (int i = 0; i < 1000; i++) {
+            executor.submit(() -> {
+                try {
+                    wallet.lockToken("tok_abort_test");
+                    handler.abort(); 
+                } finally {
+                    latch.countDown();
+                }
+            });
+        }
+
+        latch.await(60, TimeUnit.SECONDS);
+        executor.shutdown();
+
+        assertFalse("Token should be unlocked after all aborts", 
+                    wallet.isTokenLocked("tok_abort_test"));
     }
 
     // -----------------------------------------------------------------------

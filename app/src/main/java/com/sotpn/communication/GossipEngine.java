@@ -9,11 +9,6 @@ import java.util.List;
 /**
  * SOTPN - Secure Offline Token-Based Payment Network
  * Member 2: Communication + Transaction Engine
- *
- * File     : GossipEngine.java
- * Package  : com.sotpn.communication
- * Step     : Step 3 - Gossip Broadcast Engine
- * Status   : Complete
  */
 public class GossipEngine {
 
@@ -88,8 +83,14 @@ public class GossipEngine {
     public void handleIncomingGossip(String rawGossip) {
         GossipMessage message = GossipMessage.fromWireString(rawGossip);
         if (message == null) return;
+        
+        // 1. Ignore if from self
         if (message.getSenderDeviceId().equals(myDeviceId)) return;
 
+        // 2. Ignore if already processed (fixes "Relayed Twice" bug)
+        if (gossipStore.hasProcessed(message)) return;
+
+        // 3. Add to store and check for conflict
         GossipStore.ConflictResult conflict = gossipStore.addGossip(message);
 
         if (conflict.isConflict) {
@@ -98,8 +99,10 @@ public class GossipEngine {
             return;
         }
 
+        // 4. Notify listener
         listener.onGossipReceived(message);
 
+        // 5. Relay if not expired
         if (!message.isExpired()) {
             GossipMessage relayed = message.withIncrementedHop();
             broadcastToAll(relayed.toWireString());
