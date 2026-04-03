@@ -38,47 +38,57 @@ public class ArchitecturalSafetyAuditTest {
     }
 
     // -----------------------------------------------------------------------
-    // TEST 1: Resource Cleanup Integrity
-    // Verifies that aborting a transaction kills BOTH the prepare lock 
-    // and the delay timer.
+    // TEST 1: Mid-Delay Conflict Priority
+    // If a conflict is detected while the 10s timer is running, the system 
+    // MUST kill the timer and abort immediately.
     // -----------------------------------------------------------------------
     @Test
-    public void testAudit_Abort_CleansAllResources() {
-        // 1. Start a transaction to lock token and start delay
-        manager.startSend("receiver_key", 1000L);
-        ShadowLooper.idleMainLooper();
+    public void testAudit_GossipConflictDuringDelay_AbortsHappyPath() {
+        Transaction tx = new Transaction("tx_audit", "tok_audit", "s", wallet.getPublicKey(), 
+                                         System.currentTimeMillis(), "n", "s");
         
-        assertTrue("Token must be locked initially", wallet.tokenWasLocked);
+        // Start incoming transaction (reaches Phase 3 DELAYING)
+        manager.onTransactionReceived(tx);
+        ShadowLooper.idleMainLooper();
+        assertEquals(TransactionPhase.DELAYING, tx.getPhase());
 
-        // 2. Abort mid-flow
-        manager.abort();
+        // Simulate conflict arriving at T+5s
+        ShadowLooper.idleMainLooper(5, TimeUnit.SECONDS);
+        GossipStore.ConflictResult conflict = new GossipStore.ConflictResult(
+                true, "tok_audit", "tx_audit", "tx_evil", "s1", "s2");
+        
+        // This triggers the handleConflict logic
+        manager.onGossipReceived("TOKEN_SEEN:tok_audit:dev_evil:tx_evil:" + System.currentTimeMillis() + ":0");
         ShadowLooper.idleMainLooper();
 
-        // 3. CRITICAL CHECK: Both subsystems must be rolled back
-        assertTrue("Prepare system must unlock token", wallet.tokenWasUnlocked);
-        assertNull("Transaction Manager must clear active state", manager.getActiveTransaction());
+        // Transaction must be dead
+        assertEquals(TransactionPhase.FAILED, tx.getPhase());
+        
+        // Happy path timer (the 10s delay) MUST NOT wake up and commit later
+        ShadowLooper.idleMainLooper(6, TimeUnit.SECONDS);
+        assertEquals("Transaction must stay FAILED even after original delay expires", 
+                     TransactionPhase.FAILED, tx.getPhase());
     }
 
     // -----------------------------------------------------------------------
-    // TEST 2: Local Inter-Radio Conflict Detection
-    // Verifies that if two radios receive the same token simultaneously, 
-    // the system treats it as a double-spend conflict.
+    // TEST 2: Multi-Path Atomic Entry
+    // Verifies that receiving two transactions via different radios simultaneously 
+    // results in a local conflict detection.
     // -----------------------------------------------------------------------
     @Test
-    public void testAudit_SimultaneousRadios_DetectsConflict() {
-        Transaction tx1 = new Transaction("tx_ble", "tok_race", wallet.getPublicKey(), "r", System.currentTimeMillis(), "n1", "s1");
-        Transaction tx2 = new Transaction("tx_wifi", "tok_race", wallet.getPublicKey(), "r", System.currentTimeMillis(), "n2", "s2");
+    public void testAudit_InterRadioCollision_IsTreatedAsFraud() {
+        Transaction tx1 = new Transaction("tx_1", "tok_race", wallet.getPublicKey(), "r", System.currentTimeMillis(), "n1", "s1");
+        Transaction tx2 = new Transaction("tx_2", "tok_race", wallet.getPublicKey(), "r", System.currentTimeMillis(), "n2", "s2");
 
-        // 1. Receive first sighting via BLE
-        manager.onTransactionReceived(tx1, "MAC_BLE");
+        // 1. Receive via WiFi
+        manager.onTransactionReceived(tx1);
         ShadowLooper.idleMainLooper();
 
-        // 2. Receive second sighting for same token via WiFi simultaneously
-        manager.onTransactionReceived(tx2);
+        // 2. Receive second sighting for same token via BLE
+        manager.onTransactionReceived(tx2, "MAC_BLE");
         ShadowLooper.idleMainLooper();
 
-        // 3. CRITICAL CHECK: Transaction must fail due to local double-spend detection
-        assertEquals("System must detect local inter-radio collision as a failure", 
-                     TransactionPhase.FAILED, tx1.getPhase());
+        // System should have detected the conflict locally
+        assertEquals(TransactionPhase.FAILED, tx1.getPhase());
     }
 }
