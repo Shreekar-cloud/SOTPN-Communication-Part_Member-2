@@ -83,7 +83,7 @@ public class CommitPhaseHandler {
             }
         } catch (Exception e) {
             String msg = "Failed to send ACK: " + e.getMessage();
-            Log.e(TAG, msg, e);
+            Log.e(TAG, msg);
             transaction.setPhase(TransactionPhase.FAILED);
             listener.onCommitFailed(transaction.getTxId(), msg);
             return;
@@ -112,6 +112,15 @@ public class CommitPhaseHandler {
 
         if (!ack.getTxId().equals(transaction.getTxId())) {
             String msg = "ACK txId mismatch";
+            Log.e(TAG, msg);
+            transaction.setPhase(TransactionPhase.FAILED);
+            listener.onCommitFailed(transaction.getTxId(), msg);
+            return;
+        }
+
+        // SOTPN SECURITY FIX: Verify TokenID match in ACK
+        if (!ack.getTokenId().equals(transaction.getTokenId())) {
+            String msg = "ACK tokenId mismatch";
             Log.e(TAG, msg);
             transaction.setPhase(TransactionPhase.FAILED);
             listener.onCommitFailed(transaction.getTxId(), msg);

@@ -150,6 +150,7 @@ public class TransactionManager implements BleCallback, WifiDirectCallback {
         synchronized (transactionLock) {
             if (activeTransaction != null) {
                 String txId = activeTransaction.getTxId();
+                activeTransaction.setPhase(TransactionPhase.FAILED);
                 prepareHandler.abort();
                 delayHandler.abort();
                 activeTransaction = null;
@@ -174,6 +175,9 @@ public class TransactionManager implements BleCallback, WifiDirectCallback {
     @Override
     public void onTransactionSendFailed(String txId, String reason) {
         synchronized (transactionLock) {
+            if (activeTransaction != null) {
+                activeTransaction.setPhase(TransactionPhase.FAILED);
+            }
             prepareHandler.abort();
             delayHandler.abort();
             activeTransaction = null;
@@ -183,10 +187,14 @@ public class TransactionManager implements BleCallback, WifiDirectCallback {
 
     @Override
     public void onAckReceived(TransactionAck ack) {
+        if (ack == null) return;
         Log.i(TAG, "ACK received for txId: " + ack.getTxId());
 
         if (!ack.isAccepted()) {
             synchronized (transactionLock) {
+                if (activeTransaction != null) {
+                    activeTransaction.setPhase(TransactionPhase.FAILED);
+                }
                 prepareHandler.abort();
                 delayHandler.abort();
                 activeTransaction = null;
@@ -199,6 +207,20 @@ public class TransactionManager implements BleCallback, WifiDirectCallback {
             Log.w(TAG, "ACK received but no active transaction — ignoring");
             return;
         }
+
+        // SOTPN SECURITY FIX: Verify TokenID match in ACK
+        if (!ack.getTokenId().equals(activeTransaction.getTokenId())) {
+            Log.e(TAG, "ACK tokenId mismatch");
+            synchronized (transactionLock) {
+                activeTransaction.setPhase(TransactionPhase.FAILED);
+                prepareHandler.abort();
+                delayHandler.abort();
+                activeTransaction = null;
+                notifyFailed(ack.getTxId(), "ACK tokenId mismatch");
+            }
+            return;
+        }
+
         runSenderCommit(activeTransaction, ack);
     }
 
@@ -231,6 +253,7 @@ public class TransactionManager implements BleCallback, WifiDirectCallback {
             if (activeTransaction != null && activeTransaction.getPhase() != TransactionPhase.FINALIZED) {
                 Log.w(TAG, "Network lost mid-flow. Rolling back.");
                 String txId = activeTransaction.getTxId();
+                activeTransaction.setPhase(TransactionPhase.FAILED);
                 prepareHandler.abort();
                 delayHandler.abort();
                 activeTransaction = null;
@@ -249,6 +272,11 @@ public class TransactionManager implements BleCallback, WifiDirectCallback {
                             transaction.getTxId(), "BLE", "LOCAL_ACTIVE");
                     handleConflict(conflict);
                 }
+                return;
+            }
+            // SOTPN SECURITY FIX: Ignore transactions intended for other recipients
+            if (!transaction.getReceiverPublicKey().equals(wallet.getPublicKey())) {
+                Log.d(TAG, "Ignoring transaction meant for a different public key");
                 return;
             }
             activeTransaction = transaction;
@@ -286,6 +314,7 @@ public class TransactionManager implements BleCallback, WifiDirectCallback {
         synchronized (transactionLock) {
             if (activeTransaction != null && activeTransaction.getPhase() != TransactionPhase.FINALIZED) {
                 String txId = activeTransaction.getTxId();
+                activeTransaction.setPhase(TransactionPhase.FAILED);
                 prepareHandler.abort();
                 delayHandler.abort();
                 activeTransaction = null;
@@ -309,6 +338,11 @@ public class TransactionManager implements BleCallback, WifiDirectCallback {
                             transaction.getTxId(), "WIFI", "LOCAL_ACTIVE");
                     handleConflict(conflict);
                 }
+                return;
+            }
+            // SOTPN SECURITY FIX: Ignore transactions intended for other recipients
+            if (!transaction.getReceiverPublicKey().equals(wallet.getPublicKey())) {
+                Log.d(TAG, "Ignoring transaction meant for a different public key");
                 return;
             }
             activeTransaction = transaction;
@@ -373,7 +407,7 @@ public class TransactionManager implements BleCallback, WifiDirectCallback {
             public void onReceiverCommitComplete(TransactionProof proof) {
                 synchronized (transactionLock) {
                     activeTransaction = null;
-                    gossipEngine.shutdown();
+                    gossipEngine.stopBroadcasting();
                     notifyPhaseChanged(TransactionPhase.FINALIZED, "Success!");
                     mainHandler.post(() -> listener.onTransactionComplete(proof));
                 }
@@ -399,7 +433,7 @@ public class TransactionManager implements BleCallback, WifiDirectCallback {
             public void onSenderCommitComplete(TransactionProof proof) {
                 synchronized (transactionLock) {
                     activeTransaction = null;
-                    gossipEngine.shutdown();
+                    gossipEngine.stopBroadcasting();
                     notifyPhaseChanged(TransactionPhase.FINALIZED, "Success!");
                     mainHandler.post(() -> listener.onTransactionComplete(proof));
                 }
@@ -422,6 +456,7 @@ public class TransactionManager implements BleCallback, WifiDirectCallback {
         synchronized (transactionLock) {
             if (activeTransaction != null) {
                 Log.e(TAG, "ABORTING TRANSACTION: Gossip Conflict Found for " + result.tokenId);
+                activeTransaction.setPhase(TransactionPhase.FAILED);
                 delayHandler.abort();
                 prepareHandler.abort();
                 activeTransaction = null;

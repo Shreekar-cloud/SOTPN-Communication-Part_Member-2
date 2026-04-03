@@ -26,71 +26,59 @@ import static org.mockito.Mockito.*;
 @Config(sdk = 28)
 public class ProtocolSecurityAuditTest {
 
-    private TransactionManager transactionManager;
-    private MockWallet wallet;
-    private Transaction tx;
+    private TransactionManager manager;
+    private MockWallet myWallet;
+    private MockWallet senderWallet;
 
     @Before
     public void setUp() {
-        wallet = new MockWallet();
+        myWallet = new MockWallet();
+        senderWallet = new MockWallet();
         Context context = RuntimeEnvironment.getApplication();
         TransactionManager.TransactionListener listener = mock(TransactionManager.TransactionListener.class);
-        transactionManager = new TransactionManager(context, wallet, listener);
-        
-        tx = new Transaction("tx_1", "tok_1", wallet.getPublicKey(), "receiver_key", 
-                             System.currentTimeMillis(), "nonce_1", "");
-        // Sign it correctly to pass Phase 2
-        String data = tx.getTokenId() + tx.getReceiverPublicKey() + tx.getTimestamp() + tx.getNonce();
-        tx.setSignature(wallet.signTransaction(data));
+        manager = new TransactionManager(context, myWallet, listener);
     }
 
-    // -----------------------------------------------------------------------
-    // TEST 1: Mid-Delay Conflict Termination
-    // -----------------------------------------------------------------------
+    private void signTransaction(Transaction tx, MockWallet signer) {
+        String data = tx.getTokenId() + tx.getReceiverPublicKey() + tx.getTimestamp() + tx.getNonce();
+        tx.setSignature(signer.signTransaction(data));
+    }
+
     @Test
     public void testAudit_GossipConflictDuringDelay_AbortsTransaction() {
-        // 1. Start incoming transaction
-        transactionManager.onTransactionReceived(tx);
-        ShadowLooper.idleMainLooper();
+        Transaction tx = new Transaction("tx_audit", "tok_audit", senderWallet.getPublicKey(), myWallet.getPublicKey(), 
+                                         System.currentTimeMillis(), "n_audit", "");
+        signTransaction(tx, senderWallet);
         
-        // 2. Verify it is in Phase 3 (DELAYING)
+        manager.onTransactionReceived(tx);
+        ShadowLooper.idleMainLooper();
         assertEquals(TransactionPhase.DELAYING, tx.getPhase());
 
-        // 3. Inject a conflict via Gossip Message mid-way (T+2s)
-        ShadowLooper.idleMainLooper(2, TimeUnit.SECONDS);
+        // Simulate conflict arriving via Gossip
+        String maliciousGossip = "TOKEN_SEEN:tok_audit:dev_evil:tx_evil:" + System.currentTimeMillis() + ":0";
+        manager.onGossipReceived(maliciousGossip);
         
-        // Create a malicious gossip message for the SAME token but DIFFERENT transaction
-        GossipMessage maliciousGossip = new GossipMessage(
-                "tok_1", "sender_evil", "tx_evil", System.currentTimeMillis(), 0);
-        
-        // FIXED: Use the public callback onGossipReceived instead of private method
-        transactionManager.onGossipReceived(maliciousGossip.toWireString());
+        // CRITICAL: Must idle looper to allow the internal handleConflict logic to run
         ShadowLooper.idleMainLooper();
 
-        // 4. CRITICAL CHECK: Did the transaction abort?
         assertEquals("Transaction MUST be FAILED after mid-delay conflict", 
                      TransactionPhase.FAILED, tx.getPhase());
     }
 
-    // -----------------------------------------------------------------------
-    // TEST 2: Multi-Path Collision Detection
-    // -----------------------------------------------------------------------
     @Test
     public void testAudit_InterRadioCollision_IsTreatedAsDoubleSpend() {
-        // 1. Start WiFi transaction
-        transactionManager.onTransactionReceived(tx);
+        String tokenId = "tok_race";
+        Transaction tx1 = new Transaction("tx_1", tokenId, senderWallet.getPublicKey(), myWallet.getPublicKey(), System.currentTimeMillis(), "n1", "");
+        Transaction tx2 = new Transaction("tx_2", tokenId, senderWallet.getPublicKey(), myWallet.getPublicKey(), System.currentTimeMillis(), "n2", "");
+        signTransaction(tx1, senderWallet);
+        signTransaction(tx2, senderWallet);
+
+        manager.onTransactionReceived(tx1);
         ShadowLooper.idleMainLooper();
 
-        // 2. Second sender tries to send the SAME token via BLE simultaneously
-        Transaction txConflict = new Transaction("tx_evil", "tok_1", "sender_evil", wallet.getPublicKey(),
-                                                 System.currentTimeMillis(), "nonce_evil", "sig");
-        
-        // This simulates the BLE callback firing for the same token
-        transactionManager.onTransactionReceived(txConflict, "MAC_BLE");
+        manager.onTransactionReceived(tx2, "MAC_BLE");
         ShadowLooper.idleMainLooper();
 
-        // 3. System should have detected the conflict locally
-        assertEquals("System must detect local inter-radio collision as a failure", 
-                     TransactionPhase.FAILED, tx.getPhase());
+        assertEquals(TransactionPhase.FAILED, tx1.getPhase());
     }
 }

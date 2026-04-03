@@ -1,7 +1,6 @@
 package com.sotpn.communication;
 
 import android.util.Log;
-
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -9,31 +8,20 @@ import java.util.Map;
 
 /**
  * SOTPN - Secure Offline Token-Based Payment Network
- * Member 2: Communication + Transaction Engine
  */
 public class GossipStore {
 
     private static final String TAG = "GossipStore";
-    private static final long MAX_FUTURE_SKEW_MS = 10_000; // 10 seconds allowance
+    private static final long MAX_FUTURE_SKEW_MS = 10_000;
 
     private final Map<String, List<GossipMessage>> tokenGossipMap = new HashMap<>();
     private final Map<String, Long> processedKeys = new HashMap<>();
 
-    /**
-     * Add a received gossip message to the store with DoS protection.
-     */
     public synchronized ConflictResult addGossip(GossipMessage message) {
-        // 1. Deduplication
-        if (hasProcessed(message)) {
-            return ConflictResult.NO_CONFLICT;
-        }
+        if (hasProcessed(message)) return ConflictResult.NO_CONFLICT;
 
-        // 2. DoS Protection: Reject messages from the future to prevent RAM bloat
         long now = System.currentTimeMillis();
-        if (message.getTimestampMs() > now + MAX_FUTURE_SKEW_MS) {
-            Log.w(TAG, "Rejected gossip from the future: " + message.getTimestampMs() + " (now=" + now + ")");
-            return ConflictResult.NO_CONFLICT;
-        }
+        if (message.getTimestampMs() > now + MAX_FUTURE_SKEW_MS) return ConflictResult.NO_CONFLICT;
 
         String tokenId = message.getTokenId();
         processedKeys.put(getDedupKey(message), message.getTimestampMs());
@@ -51,26 +39,27 @@ public class GossipStore {
     }
 
     private String getDedupKey(GossipMessage message) {
+        // Dedup key is Token + Device + TxId to allow SAME device to send SAME Tx multiple times (as relay)
+        // but DIFFERENT TxIds from same device for same token is a conflict.
         return message.getTokenId() + "_" + message.getSenderDeviceId() + "_" + message.getTxId();
     }
 
     public synchronized ConflictResult checkConflict(String tokenId) {
         List<GossipMessage> sightings = tokenGossipMap.get(tokenId);
-        if (sightings == null || sightings.size() <= 1) {
-            return ConflictResult.NO_CONFLICT;
-        }
+        if (sightings == null || sightings.size() <= 1) return ConflictResult.NO_CONFLICT;
 
-        String firstTxId   = sightings.get(0).getTxId();
-        String firstSender = sightings.get(0).getSenderDeviceId();
+        GossipMessage first = sightings.get(0);
 
         for (int i = 1; i < sightings.size(); i++) {
             GossipMessage other = sightings.get(i);
-            if (!other.getTxId().equals(firstTxId)) {
-                return new ConflictResult(true, tokenId, firstTxId, other.getTxId(), 
-                                         firstSender, other.getSenderDeviceId());
+            // CONFLICT logic:
+            // 1. Same Token, Different Transaction IDs -> Double Spend
+            // 2. Same Token, Same Tx ID, Different Originators -> Identity Spoofing
+            if (!other.getTxId().equals(first.getTxId()) || !other.getSenderDeviceId().equals(first.getSenderDeviceId())) {
+                return new ConflictResult(true, tokenId, first.getTxId(), other.getTxId(), 
+                                         first.getSenderDeviceId(), other.getSenderDeviceId());
             }
         }
-
         return ConflictResult.NO_CONFLICT;
     }
 
@@ -79,17 +68,13 @@ public class GossipStore {
     }
 
     public synchronized List<GossipMessage> getGossipForToken(String tokenId) {
-        List<GossipMessage> list = tokenGossipMap.get(tokenId);
-        return list != null ? new ArrayList<>(list) : new ArrayList<>();
+        return tokenGossipMap.containsKey(tokenId) ? new ArrayList<>(tokenGossipMap.get(tokenId)) : new ArrayList<>();
     }
 
-    public synchronized int getTrackedTokenCount() {
-        return tokenGossipMap.size();
-    }
+    public synchronized int getTrackedTokenCount() { return tokenGossipMap.size(); }
 
     public synchronized void clearExpiredGossip(long maxAgeMs) {
-        long now = System.currentTimeMillis();
-        long cutoff = now - maxAgeMs;
+        long cutoff = System.currentTimeMillis() - maxAgeMs;
         tokenGossipMap.entrySet().removeIf(entry -> {
             entry.getValue().removeIf(m -> m.getTimestampMs() < cutoff);
             return entry.getValue().isEmpty();
