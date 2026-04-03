@@ -59,6 +59,8 @@ public class ArchitecturalSafetyAuditTest {
         // 3. CRITICAL CHECK: Transaction should still be in a pending state
         Transaction active = manager.getActiveTransaction();
         if (active != null) {
+            // Since we haven't implemented the sender-side delay yet, 
+            // this test documents the current behavior and requirements.
             assertNotEquals("Security Risk: Sender accepted an instant ACK!", 
                             TransactionPhase.FINALIZED, active.getPhase());
         }
