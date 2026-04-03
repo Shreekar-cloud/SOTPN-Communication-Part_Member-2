@@ -46,6 +46,9 @@ public class TransactionManager implements BleCallback, WifiDirectCallback {
     private Transaction activeTransaction = null;
     private boolean usingBle = true;
 
+    // Mutex for radio callbacks
+    private final Object transactionLock = new Object();
+
     public interface TransactionListener {
         void onPhaseChanged(TransactionPhase phase, String message);
         void onDelayProgress(long remainingMs, long totalMs,
@@ -115,33 +118,41 @@ public class TransactionManager implements BleCallback, WifiDirectCallback {
     }
 
     public void startSend(String receiverPublicKey, long amountPaise) {
-        notifyPhaseChanged(TransactionPhase.PREPARE, "Preparing transaction...");
+        synchronized (transactionLock) {
+            if (activeTransaction != null) {
+                Log.w(TAG, "Cannot start new send while transaction is active");
+                return;
+            }
+            notifyPhaseChanged(TransactionPhase.PREPARE, "Preparing transaction...");
 
-        prepareHandler.execute(
-                receiverPublicKey,
-                amountPaise,
-                usingBle,
-                new PreparePhaseHandler.PrepareListener() {
-                    @Override
-                    public void onPrepareSent(Transaction transaction) {
-                        activeTransaction = transaction;
-                        notifyPhaseChanged(TransactionPhase.VALIDATING,
-                                "Transaction sent — awaiting confirmation...");
-                    }
+            prepareHandler.execute(
+                    receiverPublicKey,
+                    amountPaise,
+                    usingBle,
+                    new PreparePhaseHandler.PrepareListener() {
+                        @Override
+                        public void onPrepareSent(Transaction transaction) {
+                            activeTransaction = transaction;
+                            notifyPhaseChanged(TransactionPhase.VALIDATING,
+                                    "Transaction sent — awaiting confirmation...");
+                        }
 
-                    @Override
-                    public void onPrepareFailed(String reason) {
-                        notifyFailed(null, reason);
+                        @Override
+                        public void onPrepareFailed(String reason) {
+                            notifyFailed(null, reason);
+                        }
                     }
-                }
-        );
+            );
+        }
     }
 
     public void abort() {
-        prepareHandler.abort();
-        delayHandler.abort();
-        activeTransaction = null;
-        notifyFailed(null, "Transaction cancelled");
+        synchronized (transactionLock) {
+            prepareHandler.abort();
+            delayHandler.abort();
+            activeTransaction = null;
+            notifyFailed(null, "Transaction cancelled");
+        }
     }
 
     public WifiDirectBroadcastReceiver getWifiDirectReceiver() {
@@ -157,9 +168,11 @@ public class TransactionManager implements BleCallback, WifiDirectCallback {
 
     @Override
     public void onTransactionSendFailed(String txId, String reason) {
-        prepareHandler.abort();
-        activeTransaction = null;
-        notifyFailed(txId, reason);
+        synchronized (transactionLock) {
+            prepareHandler.abort();
+            activeTransaction = null;
+            notifyFailed(txId, reason);
+        }
     }
 
     @Override
@@ -167,9 +180,11 @@ public class TransactionManager implements BleCallback, WifiDirectCallback {
         Log.i(TAG, "ACK received for txId: " + ack.getTxId());
 
         if (!ack.isAccepted()) {
-            prepareHandler.abort();
-            activeTransaction = null;
-            notifyFailed(ack.getTxId(), "Transaction rejected by receiver");
+            synchronized (transactionLock) {
+                prepareHandler.abort();
+                activeTransaction = null;
+                notifyFailed(ack.getTxId(), "Transaction rejected by receiver");
+            }
             return;
         }
 
@@ -207,17 +222,25 @@ public class TransactionManager implements BleCallback, WifiDirectCallback {
 
     @Override
     public void onDisconnected(String macAddress, String reason) {
-        if (activeTransaction != null && activeTransaction.getPhase() != TransactionPhase.FINALIZED) {
-            notifyFailed(activeTransaction.getTxId(), "Disconnected");
-            prepareHandler.abort();
-            activeTransaction = null;
+        synchronized (transactionLock) {
+            if (activeTransaction != null && activeTransaction.getPhase() != TransactionPhase.FINALIZED) {
+                notifyFailed(activeTransaction.getTxId(), "Disconnected");
+                prepareHandler.abort();
+                activeTransaction = null;
+            }
         }
     }
 
     @Override
     public void onTransactionReceived(Transaction transaction, String senderMac) {
-        activeTransaction = transaction;
-        runValidationPhase(transaction);
+        synchronized (transactionLock) {
+            if (activeTransaction != null) {
+                Log.w(TAG, "Radio Collision: Ignoring BLE incoming TX while WiFi TX is in progress");
+                return;
+            }
+            activeTransaction = transaction;
+            runValidationPhase(transaction);
+        }
     }
 
     @Override
@@ -248,10 +271,12 @@ public class TransactionManager implements BleCallback, WifiDirectCallback {
 
     @Override
     public void onDisconnected() {
-        if (activeTransaction != null && activeTransaction.getPhase() != TransactionPhase.FINALIZED) {
-            notifyFailed(activeTransaction.getTxId(), "WiFi Direct disconnected");
-            prepareHandler.abort();
-            activeTransaction = null;
+        synchronized (transactionLock) {
+            if (activeTransaction != null && activeTransaction.getPhase() != TransactionPhase.FINALIZED) {
+                notifyFailed(activeTransaction.getTxId(), "WiFi Direct disconnected");
+                prepareHandler.abort();
+                activeTransaction = null;
+            }
         }
     }
 
@@ -262,8 +287,14 @@ public class TransactionManager implements BleCallback, WifiDirectCallback {
 
     @Override
     public void onTransactionReceived(Transaction transaction) {
-        activeTransaction = transaction;
-        runValidationPhase(transaction);
+        synchronized (transactionLock) {
+            if (activeTransaction != null) {
+                Log.w(TAG, "Radio Collision: Ignoring WiFi incoming TX while BLE TX is in progress");
+                return;
+            }
+            activeTransaction = transaction;
+            runValidationPhase(transaction);
+        }
     }
 
     @Override
@@ -283,9 +314,11 @@ public class TransactionManager implements BleCallback, WifiDirectCallback {
 
             @Override
             public void onValidationFailed(Transaction tx, ValidationResult result) {
-                commitHandler.sendRejection(tx, result.getFailureMessage(), usingBle);
-                activeTransaction = null;
-                notifyFailed(tx.getTxId(), result.getFailureMessage());
+                synchronized (transactionLock) {
+                    commitHandler.sendRejection(tx, result.getFailureMessage(), usingBle);
+                    activeTransaction = null;
+                    notifyFailed(tx.getTxId(), result.getFailureMessage());
+                }
             }
         });
     }
@@ -300,10 +333,12 @@ public class TransactionManager implements BleCallback, WifiDirectCallback {
 
             @Override
             public void onDelayAborted(Transaction tx, GossipStore.ConflictResult conflict) {
-                commitHandler.sendRejection(tx, "Conflict", usingBle);
-                activeTransaction = null;
-                notifyFailed(tx.getTxId(), "Conflict detected");
-                mainHandler.post(() -> listener.onConflictDetected(conflict));
+                synchronized (transactionLock) {
+                    commitHandler.sendRejection(tx, "Conflict", usingBle);
+                    activeTransaction = null;
+                    notifyFailed(tx.getTxId(), "Conflict detected");
+                    mainHandler.post(() -> listener.onConflictDetected(conflict));
+                }
             }
 
             @Override
@@ -318,10 +353,12 @@ public class TransactionManager implements BleCallback, WifiDirectCallback {
         commitHandler.executeReceiverCommit(transaction, usingBle, new CommitPhaseHandler.CommitListener() {
             @Override
             public void onReceiverCommitComplete(TransactionProof proof) {
-                activeTransaction = null;
-                gossipEngine.shutdown();
-                notifyPhaseChanged(TransactionPhase.FINALIZED, "Success!");
-                mainHandler.post(() -> listener.onTransactionComplete(proof));
+                synchronized (transactionLock) {
+                    activeTransaction = null;
+                    gossipEngine.shutdown();
+                    notifyPhaseChanged(TransactionPhase.FINALIZED, "Success!");
+                    mainHandler.post(() -> listener.onTransactionComplete(proof));
+                }
             }
 
             @Override
@@ -329,8 +366,10 @@ public class TransactionManager implements BleCallback, WifiDirectCallback {
 
             @Override
             public void onCommitFailed(String txId, String reason) {
-                activeTransaction = null;
-                notifyFailed(txId, reason);
+                synchronized (transactionLock) {
+                    activeTransaction = null;
+                    notifyFailed(txId, reason);
+                }
             }
         });
     }
@@ -340,10 +379,12 @@ public class TransactionManager implements BleCallback, WifiDirectCallback {
         commitHandler.executeSenderCommit(transaction, ack, new CommitPhaseHandler.CommitListener() {
             @Override
             public void onSenderCommitComplete(TransactionProof proof) {
-                activeTransaction = null;
-                gossipEngine.shutdown();
-                notifyPhaseChanged(TransactionPhase.FINALIZED, "Success!");
-                mainHandler.post(() -> listener.onTransactionComplete(proof));
+                synchronized (transactionLock) {
+                    activeTransaction = null;
+                    gossipEngine.shutdown();
+                    notifyPhaseChanged(TransactionPhase.FINALIZED, "Success!");
+                    mainHandler.post(() -> listener.onTransactionComplete(proof));
+                }
             }
 
             @Override
@@ -351,8 +392,10 @@ public class TransactionManager implements BleCallback, WifiDirectCallback {
 
             @Override
             public void onCommitFailed(String txId, String reason) {
-                activeTransaction = null;
-                notifyFailed(txId, reason);
+                synchronized (transactionLock) {
+                    activeTransaction = null;
+                    notifyFailed(txId, reason);
+                }
             }
         });
     }
