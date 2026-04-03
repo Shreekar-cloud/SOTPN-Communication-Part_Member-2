@@ -43,6 +43,16 @@ public class GossipEngine {
         this.handler      = new Handler(Looper.getMainLooper());
     }
 
+    /**
+     * Records a local transaction in the gossip store so conflicts can be detected
+     * against it if other devices broadcast the same token.
+     */
+    public void recordLocalSighting(String tokenId, String txId) {
+        GossipMessage localMsg = new GossipMessage(
+                tokenId, myDeviceId, txId, System.currentTimeMillis(), 0);
+        gossipStore.addGossip(localMsg);
+    }
+
     public void startBroadcasting(String tokenId, String txId, long delayMs) {
         if (isActive) return;
         isActive = true;
@@ -84,13 +94,9 @@ public class GossipEngine {
         GossipMessage message = GossipMessage.fromWireString(rawGossip);
         if (message == null) return;
         
-        // 1. Ignore if from self
         if (message.getSenderDeviceId().equals(myDeviceId)) return;
-
-        // 2. Ignore if already processed (fixes "Relayed Twice" bug)
         if (gossipStore.hasProcessed(message)) return;
 
-        // 3. Add to store and check for conflict
         GossipStore.ConflictResult conflict = gossipStore.addGossip(message);
 
         if (conflict.isConflict) {
@@ -99,10 +105,8 @@ public class GossipEngine {
             return;
         }
 
-        // 4. Notify listener
         listener.onGossipReceived(message);
 
-        // 5. Relay if not expired
         if (!message.isExpired()) {
             GossipMessage relayed = message.withIncrementedHop();
             broadcastToAll(relayed.toWireString());
@@ -122,8 +126,22 @@ public class GossipEngine {
     }
 
     private void broadcastToAll(String gossipWireString) {
-        bleManager.broadcastGossip(extractTokenId(gossipWireString));
-        wifiManager.sendGossip(gossipWireString);
+        // Robust broadcasting: one radio failing shouldn't stop the other
+        try {
+            if (bleManager != null) {
+                bleManager.broadcastGossip(extractTokenId(gossipWireString));
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "BLE gossip broadcast failed", e);
+        }
+
+        try {
+            if (wifiManager != null) {
+                wifiManager.sendGossip(gossipWireString);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "WiFi Direct gossip broadcast failed", e);
+        }
     }
 
     private String extractTokenId(String wireString) {

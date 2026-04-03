@@ -46,7 +46,6 @@ public class TransactionManager implements BleCallback, WifiDirectCallback {
     private Transaction activeTransaction = null;
     private boolean usingBle = true;
 
-    // Mutex for radio callbacks
     private final Object transactionLock = new Object();
 
     public interface TransactionListener {
@@ -133,6 +132,7 @@ public class TransactionManager implements BleCallback, WifiDirectCallback {
                         @Override
                         public void onPrepareSent(Transaction transaction) {
                             activeTransaction = transaction;
+                            gossipEngine.recordLocalSighting(transaction.getTokenId(), transaction.getTxId());
                             notifyPhaseChanged(TransactionPhase.VALIDATING,
                                     "Transaction sent — awaiting confirmation...");
                         }
@@ -148,18 +148,19 @@ public class TransactionManager implements BleCallback, WifiDirectCallback {
 
     public void abort() {
         synchronized (transactionLock) {
-            prepareHandler.abort();
-            delayHandler.abort();
-            activeTransaction = null;
-            notifyFailed(null, "Transaction cancelled");
+            if (activeTransaction != null) {
+                String txId = activeTransaction.getTxId();
+                prepareHandler.abort();
+                delayHandler.abort();
+                activeTransaction = null;
+                notifyFailed(txId, "Transaction aborted");
+            }
         }
     }
 
     public WifiDirectBroadcastReceiver getWifiDirectReceiver() {
         return wifiManager.getReceiver();
     }
-
-    // --- Implementation of Overlapping Callbacks ---
 
     @Override
     public void onTransactionSent(String txId) {
@@ -170,6 +171,7 @@ public class TransactionManager implements BleCallback, WifiDirectCallback {
     public void onTransactionSendFailed(String txId, String reason) {
         synchronized (transactionLock) {
             prepareHandler.abort();
+            delayHandler.abort();
             activeTransaction = null;
             notifyFailed(txId, reason);
         }
@@ -182,6 +184,7 @@ public class TransactionManager implements BleCallback, WifiDirectCallback {
         if (!ack.isAccepted()) {
             synchronized (transactionLock) {
                 prepareHandler.abort();
+                delayHandler.abort();
                 activeTransaction = null;
                 notifyFailed(ack.getTxId(), "Transaction rejected by receiver");
             }
@@ -205,8 +208,6 @@ public class TransactionManager implements BleCallback, WifiDirectCallback {
         gossipEngine.handleIncomingGossip(gossipMessage);
     }
 
-    // --- BleCallback Specific (additional) ---
-
     @Override
     public void onDeviceDiscovered(BleDeviceInfo device) {
         mainHandler.post(() -> listener.onPeerDiscovered(device));
@@ -224,9 +225,12 @@ public class TransactionManager implements BleCallback, WifiDirectCallback {
     public void onDisconnected(String macAddress, String reason) {
         synchronized (transactionLock) {
             if (activeTransaction != null && activeTransaction.getPhase() != TransactionPhase.FINALIZED) {
-                notifyFailed(activeTransaction.getTxId(), "Disconnected");
+                Log.w(TAG, "Network lost mid-flow. Rolling back.");
+                String txId = activeTransaction.getTxId();
                 prepareHandler.abort();
+                delayHandler.abort();
                 activeTransaction = null;
+                notifyFailed(txId, "Disconnected: " + reason);
             }
         }
     }
@@ -235,10 +239,16 @@ public class TransactionManager implements BleCallback, WifiDirectCallback {
     public void onTransactionReceived(Transaction transaction, String senderMac) {
         synchronized (transactionLock) {
             if (activeTransaction != null) {
-                Log.w(TAG, "Radio Collision: Ignoring BLE incoming TX while WiFi TX is in progress");
+                if (activeTransaction.getTokenId().equals(transaction.getTokenId())) {
+                    GossipStore.ConflictResult conflict = new GossipStore.ConflictResult(
+                            true, transaction.getTokenId(), activeTransaction.getTxId(),
+                            transaction.getTxId(), "BLE", "LOCAL_ACTIVE");
+                    handleConflict(conflict);
+                }
                 return;
             }
             activeTransaction = transaction;
+            gossipEngine.recordLocalSighting(transaction.getTokenId(), transaction.getTxId());
             runValidationPhase(transaction);
         }
     }
@@ -252,8 +262,6 @@ public class TransactionManager implements BleCallback, WifiDirectCallback {
     public void onBleError(String reason) {
         notifyFailed(activeTransaction != null ? activeTransaction.getTxId() : null, reason);
     }
-
-    // --- WifiDirectCallback Specific (additional) ---
 
     @Override
     public void onDiscoveryStarted() {}
@@ -273,9 +281,11 @@ public class TransactionManager implements BleCallback, WifiDirectCallback {
     public void onDisconnected() {
         synchronized (transactionLock) {
             if (activeTransaction != null && activeTransaction.getPhase() != TransactionPhase.FINALIZED) {
-                notifyFailed(activeTransaction.getTxId(), "WiFi Direct disconnected");
+                String txId = activeTransaction.getTxId();
                 prepareHandler.abort();
+                delayHandler.abort();
                 activeTransaction = null;
+                notifyFailed(txId, "WiFi Direct disconnected");
             }
         }
     }
@@ -289,10 +299,16 @@ public class TransactionManager implements BleCallback, WifiDirectCallback {
     public void onTransactionReceived(Transaction transaction) {
         synchronized (transactionLock) {
             if (activeTransaction != null) {
-                Log.w(TAG, "Radio Collision: Ignoring WiFi incoming TX while BLE TX is in progress");
+                if (activeTransaction.getTokenId().equals(transaction.getTokenId())) {
+                    GossipStore.ConflictResult conflict = new GossipStore.ConflictResult(
+                            true, transaction.getTokenId(), activeTransaction.getTxId(),
+                            transaction.getTxId(), "WIFI", "LOCAL_ACTIVE");
+                    handleConflict(conflict);
+                }
                 return;
             }
             activeTransaction = transaction;
+            gossipEngine.recordLocalSighting(transaction.getTokenId(), transaction.getTxId());
             runValidationPhase(transaction);
         }
     }
@@ -301,8 +317,6 @@ public class TransactionManager implements BleCallback, WifiDirectCallback {
     public void onWiFiDirectError(String reason) {
         notifyFailed(activeTransaction != null ? activeTransaction.getTxId() : null, reason);
     }
-
-    // --- Phase Runners ---
 
     private void runValidationPhase(Transaction transaction) {
         notifyPhaseChanged(TransactionPhase.VALIDATING, "Validating...");
@@ -401,6 +415,14 @@ public class TransactionManager implements BleCallback, WifiDirectCallback {
     }
 
     private void handleConflict(GossipStore.ConflictResult result) {
+        synchronized (transactionLock) {
+            if (activeTransaction != null) {
+                Log.e(TAG, "ABORTING TRANSACTION: Gossip Conflict Found for " + result.tokenId);
+                delayHandler.abort();
+                prepareHandler.abort();
+                activeTransaction = null;
+            }
+        }
         mainHandler.post(() -> listener.onConflictDetected(result));
     }
 
