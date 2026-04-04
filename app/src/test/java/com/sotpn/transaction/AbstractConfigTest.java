@@ -1,7 +1,9 @@
 package com.sotpn.transaction;
 
+import com.sotpn.communication.GossipStore;
 import com.sotpn.model.Transaction;
 import com.sotpn.model.TransactionPhase;
+import com.sotpn.wallet.WalletInterface;
 
 import org.junit.Before;
 import org.junit.Test;

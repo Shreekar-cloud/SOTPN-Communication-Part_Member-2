@@ -34,15 +34,28 @@ public class DeepMeshStabilityTest {
         // 1. Malicious peer sends an "Expired" version (Hop 9) to try and mute the network
         GossipMessage staleMsg = new GossipMessage(tokenId, devId, txId, now, 9);
         store.addGossip(staleMsg);
+        
+        // Verification: The stale message is recorded as processed.
         assertTrue("Store should record the first sighting", store.hasProcessed(staleMsg));
 
         // 2. A valid, nearby peer sends the same sighting (Hop 0)
         GossipMessage freshMsg = new GossipMessage(tokenId, devId, txId, now, 0);
         
         // Logic: Even if the Dedup Key matches, the system must recognize that 
-        // the fresh message has a better 'Hop Reach' and should be processed.
-        // Current requirement: Security first. 
-        assertTrue("System MUST remain alert to fresh sightings even if IDs match stale ones", 
+        // the fresh message has a better 'Hop Reach' and should NOT be marked as 
+        // processed until it is actually added.
+        assertFalse("System MUST NOT ignore fresh sightings even if IDs match stale ones", 
                    store.hasProcessed(freshMsg));
+                   
+        // 3. Add the fresh message
+        store.addGossip(freshMsg);
+        
+        // NOW it should be marked as processed
+        assertTrue("Now the higher priority gossip should be marked as processed",
+                   store.hasProcessed(freshMsg));
+                   
+        // And the storage should contain the better sighting
+        assertTrue("Store must keep the fresh sighting for relaying", 
+                   store.getGossipForToken(tokenId).contains(freshMsg));
     }
 }

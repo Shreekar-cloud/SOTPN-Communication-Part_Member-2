@@ -1,6 +1,7 @@
 package com.sotpn.communication;
 
 import android.util.Log;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -8,6 +9,7 @@ import java.util.Map;
 
 /**
  * SOTPN - Secure Offline Token-Based Payment Network
+ * Member 2: Communication + Transaction Engine
  */
 public class GossipStore {
 
@@ -16,26 +18,44 @@ public class GossipStore {
 
     private final Map<String, List<GossipMessage>> tokenGossipMap = new HashMap<>();
     private final Map<String, Long> processedKeys = new HashMap<>();
+    private final Map<String, Integer> bestHopSeen = new HashMap<>();
 
     public synchronized ConflictResult addGossip(GossipMessage message) {
-        if (hasProcessed(message)) return ConflictResult.NO_CONFLICT;
+        if (hasProcessed(message)) {
+            return ConflictResult.NO_CONFLICT;
+        }
 
         long now = System.currentTimeMillis();
-        if (message.getTimestampMs() > now + MAX_FUTURE_SKEW_MS) return ConflictResult.NO_CONFLICT;
+        if (message.getTimestampMs() > now + MAX_FUTURE_SKEW_MS) {
+            return ConflictResult.NO_CONFLICT;
+        }
+
+        String key = getDedupKey(message);
+        processedKeys.put(key, message.getTimestampMs());
+        bestHopSeen.put(key, message.getHopCount());
 
         String tokenId = message.getTokenId();
-        processedKeys.put(getDedupKey(message), message.getTimestampMs());
-
         if (!tokenGossipMap.containsKey(tokenId)) {
             tokenGossipMap.put(tokenId, new ArrayList<>());
         }
-        tokenGossipMap.get(tokenId).add(message);
+        
+        // SOTPN Logic: If we are replacing a stale sighting for the same txId, remove the old one.
+        // This ensures the store doesn't grow with duplicate transaction sightings and prioritizes fresh info.
+        List<GossipMessage> sightings = tokenGossipMap.get(tokenId);
+        sightings.removeIf(m -> m.getTxId().equals(message.getTxId()) && m.getSenderDeviceId().equals(message.getSenderDeviceId()));
+        sightings.add(message);
 
         return checkConflict(tokenId);
     }
 
     public synchronized boolean hasProcessed(GossipMessage message) {
-        return processedKeys.containsKey(getDedupKey(message));
+        String key = getDedupKey(message);
+        if (!processedKeys.containsKey(key)) return false;
+        
+        Integer best = bestHopSeen.get(key);
+        // Only consider it processed if the new message doesn't have a better (lower) hop count.
+        // This prevents "Gossip Shadowing" where a high-hop message blocks a low-hop alert.
+        return best != null && message.getHopCount() >= best;
     }
 
     private String getDedupKey(GossipMessage message) {
@@ -67,20 +87,25 @@ public class GossipStore {
         return tokenGossipMap.containsKey(tokenId) ? new ArrayList<>(tokenGossipMap.get(tokenId)) : new ArrayList<>();
     }
 
-    public synchronized int getTrackedTokenCount() { return tokenGossipMap.size(); }
+    public synchronized int getTrackedTokenCount() {
+        return tokenGossipMap.size();
+    }
 
     public synchronized void clearExpiredGossip(long maxAgeMs) {
-        long cutoff = System.currentTimeMillis() - maxAgeMs;
+        long now = System.currentTimeMillis();
+        long cutoff = now - maxAgeMs;
         tokenGossipMap.entrySet().removeIf(entry -> {
             entry.getValue().removeIf(m -> m.getTimestampMs() < cutoff);
             return entry.getValue().isEmpty();
         });
         processedKeys.entrySet().removeIf(e -> e.getValue() < cutoff);
+        bestHopSeen.keySet().removeIf(k -> !processedKeys.containsKey(k));
     }
 
     public synchronized void clearAll() {
         tokenGossipMap.clear();
         processedKeys.clear();
+        bestHopSeen.clear();
     }
 
     public static class ConflictResult {
