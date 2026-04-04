@@ -132,7 +132,7 @@ public class TransactionManager implements BleCallback, WifiDirectCallback {
                         @Override
                         public void onPrepareSent(Transaction transaction) {
                             activeTransaction = transaction;
-                            gossipEngine.recordLocalSighting(transaction.getTokenId(), transaction.getTxId());
+                            gossipEngine.recordLocalSighting(transaction.getTokenId(), transaction.getTxId(), transaction.getSignature());
                             notifyPhaseChanged(TransactionPhase.VALIDATING,
                                     "Transaction sent — awaiting confirmation...");
                         }
@@ -280,7 +280,7 @@ public class TransactionManager implements BleCallback, WifiDirectCallback {
                 return;
             }
             activeTransaction = transaction;
-            gossipEngine.recordLocalSighting(transaction.getTokenId(), transaction.getTxId());
+            gossipEngine.recordLocalSighting(transaction.getTokenId(), transaction.getTxId(), transaction.getSignature());
             runValidationPhase(transaction);
         }
     }
@@ -346,7 +346,7 @@ public class TransactionManager implements BleCallback, WifiDirectCallback {
                 return;
             }
             activeTransaction = transaction;
-            gossipEngine.recordLocalSighting(transaction.getTokenId(), transaction.getTxId());
+            gossipEngine.recordLocalSighting(transaction.getTokenId(), transaction.getTxId(), transaction.getSignature());
             runValidationPhase(transaction);
         }
     }

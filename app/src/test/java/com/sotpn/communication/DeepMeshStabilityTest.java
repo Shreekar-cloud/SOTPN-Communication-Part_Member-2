@@ -32,14 +32,15 @@ public class DeepMeshStabilityTest {
         long now = System.currentTimeMillis();
 
         // 1. Malicious peer sends an "Expired" version (Hop 9) to try and mute the network
-        GossipMessage staleMsg = new GossipMessage(tokenId, devId, txId, now, 9);
+        // Corrected: Using the 6-argument constructor
+        GossipMessage staleMsg = new GossipMessage(tokenId, devId, txId, now, "sig_stale", 9);
         store.addGossip(staleMsg);
         
         // Verification: The stale message is recorded as processed.
         assertTrue("Store should record the first sighting", store.hasProcessed(staleMsg));
 
         // 2. A valid, nearby peer sends the same sighting (Hop 0)
-        GossipMessage freshMsg = new GossipMessage(tokenId, devId, txId, now, 0);
+        GossipMessage freshMsg = new GossipMessage(tokenId, devId, txId, now, "sig_fresh", 0);
         
         // Logic: Even if the Dedup Key matches, the system must recognize that 
         // the fresh message has a better 'Hop Reach' and should NOT be marked as 

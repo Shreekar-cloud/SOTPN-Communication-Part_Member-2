@@ -98,7 +98,7 @@ public class GossipNetworkTest {
     public void test6_gossipAtHop0_shouldBeRelayed() {
         GossipMessage msg = new GossipMessage(
                 "tok_hop0", "device_A", "tx_001",
-                System.currentTimeMillis(), 0);
+                System.currentTimeMillis(), "sig_001", 0);
         assertFalse("Hop 0 message should NOT be expired", msg.isExpired());
         GossipMessage relayed = msg.withIncrementedHop();
         assertEquals("Relayed hop should be 1", 1, relayed.getHopCount());
@@ -112,7 +112,7 @@ public class GossipNetworkTest {
     public void test7_gossipAtHop2_shouldBeRelayed() {
         GossipMessage msg = new GossipMessage(
                 "tok_hop2", "device_A", "tx_001",
-                System.currentTimeMillis(), 2);
+                System.currentTimeMillis(), "sig_001", 2);
         assertFalse("Hop 2 should NOT be expired (max="
                 + GossipMessage.MAX_HOPS + ")", msg.isExpired());
         System.out.println("TEST 7 — Hop 2 not expired ✅");
@@ -125,7 +125,7 @@ public class GossipNetworkTest {
     public void test8_gossipAtMaxHops_notRelayed() {
         GossipMessage msg = new GossipMessage(
                 "tok_maxhop", "device_A", "tx_001",
-                System.currentTimeMillis(), GossipMessage.MAX_HOPS);
+                System.currentTimeMillis(), "sig_001", GossipMessage.MAX_HOPS);
         assertTrue("Max hop message MUST be expired", msg.isExpired());
         System.out.println("TEST 8 — Max hop expired, not relayed ✅ (MAX="
                 + GossipMessage.MAX_HOPS + ")");
@@ -138,10 +138,10 @@ public class GossipNetworkTest {
     public void test9_sameDeviceGossipTwice_deduplicated() {
         GossipMessage msg1 = new GossipMessage(
                 "tok_dedup", "device_A", "tx_001",
-                System.currentTimeMillis(), 0);
+                System.currentTimeMillis(), "sig_001", 0);
         GossipMessage msg2 = new GossipMessage(
                 "tok_dedup", "device_A", "tx_001", // same sender + token
-                System.currentTimeMillis(), 0);
+                System.currentTimeMillis(), "sig_001", 0);
 
         gossipStore.addGossip(msg1);
         gossipStore.addGossip(msg2);
@@ -161,7 +161,7 @@ public class GossipNetworkTest {
                     "tok_flood_" + (i % 10), // 10 unique tokens
                     "device_" + i,
                     "tx_" + i,
-                    System.currentTimeMillis(), 0));
+                    System.currentTimeMillis(), "sig_" + i, 0));
         }
 
         // Store must still work correctly

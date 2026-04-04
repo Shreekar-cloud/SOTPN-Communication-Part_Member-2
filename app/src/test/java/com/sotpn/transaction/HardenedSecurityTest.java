@@ -52,7 +52,8 @@ public class HardenedSecurityTest {
     // -----------------------------------------------------------------------
     @Test
     public void testStability_DedupCache_IsPurged() {
-        GossipMessage msg = new GossipMessage("tok_1", "dev_1", "tx_1", System.currentTimeMillis() - 200000, 0);
+        // Updated to use hardened 6-argument constructor
+        GossipMessage msg = new GossipMessage("tok_1", "dev_1", "tx_1", System.currentTimeMillis() - 200000, "sig_1", 0);
         store.addGossip(msg);
         
         assertTrue("Pre-condition: Msg should be processed", store.hasProcessed(msg));

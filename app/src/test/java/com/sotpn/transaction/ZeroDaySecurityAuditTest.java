@@ -42,10 +42,10 @@ public class ZeroDaySecurityAuditTest {
     @Test
     public void testAudit_ConflictDetected_ShouldSwitchToAlertMode() {
         // Start local sighting
-        engine.recordLocalSighting("tok_1", "tx_local");
+        engine.recordLocalSighting("tok_1", "tx_local", "sig_local");
         
         // Receive conflict from mesh
-        GossipMessage conflictMsg = new GossipMessage("tok_1", "dev_evil", "tx_evil", System.currentTimeMillis(), 0);
+        GossipMessage conflictMsg = new GossipMessage("tok_1", "dev_evil", "tx_evil", System.currentTimeMillis(), "sig_evil", 0);
         engine.handleIncomingGossip(conflictMsg.toWireString());
 
         // In a fortified system, the engine would continue broadcasting the CONFLICT

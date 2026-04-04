@@ -44,13 +44,17 @@ public class GossipEngine {
         this.handler      = new Handler(Looper.getMainLooper());
     }
 
-    public void recordLocalSighting(String tokenId, String txId) {
+    /**
+     * Records a local transaction in the gossip store so conflicts can be detected
+     * against it if other devices broadcast the same token.
+     */
+    public void recordLocalSighting(String tokenId, String txId, String signature) {
         GossipMessage localMsg = new GossipMessage(
-                tokenId, myDeviceId, txId, System.currentTimeMillis(), 0);
+                tokenId, myDeviceId, txId, System.currentTimeMillis(), signature, 0);
         gossipStore.addGossip(localMsg);
     }
 
-    public void startBroadcasting(String tokenId, String txId, long delayMs) {
+    public void startBroadcasting(String tokenId, String txId, String signature, long delayMs) {
         if (isActive) return;
         isActive = true;
 
@@ -59,6 +63,7 @@ public class GossipEngine {
                 myDeviceId,
                 txId,
                 System.currentTimeMillis(),
+                signature,
                 0
         );
 
@@ -99,7 +104,7 @@ public class GossipEngine {
         GossipMessage message = GossipMessage.fromWireString(rawGossip);
         if (message == null) return;
         
-        if (message.getSenderDeviceId().equals(myDeviceId)) return;
+        if (message.getSenderPublicKey().equals(myDeviceId)) return;
         if (gossipStore.hasProcessed(message)) return;
 
         GossipStore.ConflictResult conflict = gossipStore.addGossip(message);

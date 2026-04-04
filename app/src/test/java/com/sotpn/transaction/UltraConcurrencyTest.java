@@ -57,7 +57,8 @@ public class UltraConcurrencyTest {
         executor.submit(() -> {
             try {
                 barrier.await(); // Wait for sync
-                store.addGossip(new com.sotpn.communication.GossipMessage(tokenId, "dev_evil", "tx_evil", System.currentTimeMillis(), 0));
+                // Updated to 6-arg constructor: (tokenId, senderPubKey, txId, timestampMs, signature, hopCount)
+                store.addGossip(new com.sotpn.communication.GossipMessage(tokenId, "dev_evil", "tx_evil", System.currentTimeMillis(), "sig_evil", 0));
             } catch (Exception e) { e.printStackTrace(); }
         });
 

@@ -87,11 +87,12 @@ public class AdvancedProtocolSecurityTest {
         String txId = "tx_shared";
         
         // 1. Device A reports originating Tx_shared
-        store.addGossip(new com.sotpn.communication.GossipMessage(tokenId, "device_A", txId, System.currentTimeMillis(), 0));
+        // Updated to 6-arg constructor: (tokenId, senderPubKey, txId, timestamp, signature, hopCount)
+        store.addGossip(new com.sotpn.communication.GossipMessage(tokenId, "device_A", txId, System.currentTimeMillis(), "sig_A", 0));
         
         // 2. Device B reports originating the SAME TxId (Collision/Spoofing)
         com.sotpn.communication.GossipStore.ConflictResult result = 
-            store.addGossip(new com.sotpn.communication.GossipMessage(tokenId, "device_B", txId, System.currentTimeMillis(), 0));
+            store.addGossip(new com.sotpn.communication.GossipMessage(tokenId, "device_B", txId, System.currentTimeMillis(), "sig_B", 0));
 
         assertTrue("Gossip Store MUST detect conflict if two different devices report the same TxId", 
                    result.isConflict);

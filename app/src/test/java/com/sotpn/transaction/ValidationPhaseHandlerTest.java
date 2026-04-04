@@ -170,8 +170,9 @@ public class ValidationPhaseHandlerTest {
 
     @Test
     public void testGossipConflict_failsValidation() {
-        gossipStore.addGossip(new GossipMessage("tok_conflict", "device_A", "tx_existing", System.currentTimeMillis(), 0));
-        gossipStore.addGossip(new GossipMessage("tok_conflict", "device_B", "tx_different", System.currentTimeMillis(), 0));
+        // Updated to use 6-argument constructor
+        gossipStore.addGossip(new GossipMessage("tok_conflict", "device_A", "tx_existing", System.currentTimeMillis(), "sig_existing", 0));
+        gossipStore.addGossip(new GossipMessage("tok_conflict", "device_B", "tx_different", System.currentTimeMillis(), "sig_different", 0));
         
         Transaction tx = buildValidTransaction();
         tx.setTokenId("tok_conflict");

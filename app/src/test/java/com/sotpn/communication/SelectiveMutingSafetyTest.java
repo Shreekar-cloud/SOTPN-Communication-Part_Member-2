@@ -48,7 +48,8 @@ public class SelectiveMutingSafetyTest {
         doThrow(new RuntimeException("BLE Radio Jammed")).when(bleMock).broadcastGossip(anyString());
 
         // Start broadcasting (Phase 3 simulation)
-        engine.startBroadcasting("tok_1", "tx_1", 10000);
+        // Updated to match 4-argument startBroadcasting: (tokenId, txId, signature, delayMs)
+        engine.startBroadcasting("tok_1", "tx_1", "sig_1", 10000L);
         
         // Idle the looper to allow the Handler to execute the first broadcast task
         ShadowLooper.idleMainLooper();
@@ -56,8 +57,5 @@ public class SelectiveMutingSafetyTest {
         // Verify that even though BLE failed, WiFi still attempted to send
         // This ensures gossip isn't totally silenced by a single radio exploit.
         verify(wifiMock, atLeastOnce()).sendGossip(anyString());
-        
-        // Check that the engine didn't crash and is still active
-        // (Internal isActive check would be good, but we can verify via subsequent calls)
     }
 }

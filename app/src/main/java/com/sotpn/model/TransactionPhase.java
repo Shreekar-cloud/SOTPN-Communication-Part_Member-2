@@ -2,6 +2,12 @@ package com.sotpn.model;
 
 /**
  * SOTPN - Secure Offline Token-Based Payment Network
+ * Member 2: Communication + Transaction Engine
+ *
+ * File     : TransactionPhase.java
+ * Package  : com.sotpn.model
+ * Step     : Step 2 - Transaction Model
+ * Status   : Complete
  */
 public enum TransactionPhase {
     PREPARE,      // Phase 1 — sender preparing

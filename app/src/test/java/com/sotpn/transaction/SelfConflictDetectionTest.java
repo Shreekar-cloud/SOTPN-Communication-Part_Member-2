@@ -35,12 +35,12 @@ public class SelfConflictDetectionTest {
         long now = System.currentTimeMillis();
 
         // 1. First transaction
-        GossipMessage msg1 = new GossipMessage(tokenId, senderId, "tx_alpha", now, 0);
+        GossipMessage msg1 = new GossipMessage(tokenId, senderId, "tx_alpha", now, "sig_alpha", 0);
         GossipStore.ConflictResult res1 = store.addGossip(msg1);
         assertFalse("First sighting should not be a conflict", res1.isConflict);
 
         // 2. Second transaction (Same token, Same sender, DIFFERENT TXID)
-        GossipMessage msg2 = new GossipMessage(tokenId, senderId, "tx_beta", now + 100, 0);
+        GossipMessage msg2 = new GossipMessage(tokenId, senderId, "tx_beta", now + 100, "sig_beta", 0);
         GossipStore.ConflictResult res2 = store.addGossip(msg2);
 
         // This will FAIL if the deduplication logic is too broad (tokenId + senderId)

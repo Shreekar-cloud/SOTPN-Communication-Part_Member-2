@@ -1,7 +1,5 @@
 package com.sotpn.communication;
 
-import android.util.Log;
-
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -13,7 +11,6 @@ import java.util.Map;
  */
 public class GossipStore {
 
-    private static final String TAG = "GossipStore";
     private static final long MAX_FUTURE_SKEW_MS = 10_000;
 
     private final Map<String, List<GossipMessage>> tokenGossipMap = new HashMap<>();
@@ -39,11 +36,13 @@ public class GossipStore {
             tokenGossipMap.put(tokenId, new ArrayList<>());
         }
         
-        // SOTPN Logic: If we are replacing a stale sighting for the same txId, remove the old one.
-        // This ensures the store doesn't grow with duplicate transaction sightings and prioritizes fresh info.
         List<GossipMessage> sightings = tokenGossipMap.get(tokenId);
-        sightings.removeIf(m -> m.getTxId().equals(message.getTxId()) && m.getSenderDeviceId().equals(message.getSenderDeviceId()));
-        sightings.add(message);
+        if (sightings != null) {
+            // SOTPN Logic: If we are replacing a stale sighting for the same txId, remove the old one.
+            sightings.removeIf(m -> m.getTxId().equals(message.getTxId()) 
+                    && m.getSenderPublicKey().equals(message.getSenderPublicKey()));
+            sightings.add(message);
+        }
 
         return checkConflict(tokenId);
     }
@@ -54,12 +53,11 @@ public class GossipStore {
         
         Integer best = bestHopSeen.get(key);
         // Only consider it processed if the new message doesn't have a better (lower) hop count.
-        // This prevents "Gossip Shadowing" where a high-hop message blocks a low-hop alert.
         return best != null && message.getHopCount() >= best;
     }
 
     private String getDedupKey(GossipMessage message) {
-        return message.getTokenId() + "_" + message.getSenderDeviceId() + "_" + message.getTxId();
+        return message.getTokenId() + "_" + message.getSenderPublicKey() + "_" + message.getTxId();
     }
 
     public synchronized ConflictResult checkConflict(String tokenId) {
@@ -71,20 +69,22 @@ public class GossipStore {
         for (int i = 1; i < sightings.size(); i++) {
             GossipMessage other = sightings.get(i);
             // SOTPN SECURITY FIX: Conflict if DIFFERENT TxId OR DIFFERENT Sender for same TxId (Identity spoofing)
-            if (!other.getTxId().equals(first.getTxId()) || !other.getSenderDeviceId().equals(first.getSenderDeviceId())) {
+            if (!other.getTxId().equals(first.getTxId()) || !other.getSenderPublicKey().equals(first.getSenderPublicKey())) {
                 return new ConflictResult(true, tokenId, first.getTxId(), other.getTxId(), 
-                                         first.getSenderDeviceId(), other.getSenderDeviceId());
+                                         first.getSenderPublicKey(), other.getSenderPublicKey());
             }
         }
         return ConflictResult.NO_CONFLICT;
     }
 
     public synchronized boolean hasSeenToken(String tokenId) {
-        return tokenGossipMap.containsKey(tokenId) && !tokenGossipMap.get(tokenId).isEmpty();
+        List<GossipMessage> list = tokenGossipMap.get(tokenId);
+        return list != null && !list.isEmpty();
     }
 
     public synchronized List<GossipMessage> getGossipForToken(String tokenId) {
-        return tokenGossipMap.containsKey(tokenId) ? new ArrayList<>(tokenGossipMap.get(tokenId)) : new ArrayList<>();
+        List<GossipMessage> list = tokenGossipMap.get(tokenId);
+        return list != null ? new ArrayList<>(list) : new ArrayList<>();
     }
 
     public synchronized int getTrackedTokenCount() {

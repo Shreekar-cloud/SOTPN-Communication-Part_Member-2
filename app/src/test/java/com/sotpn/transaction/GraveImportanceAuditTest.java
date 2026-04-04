@@ -62,11 +62,11 @@ public class GraveImportanceAuditTest {
     public void testAudit_CrossRadio_ConflictDetection() {
         String tokenId = "tok_race";
         // 1. sighting 1 via BLE
-        GossipMessage m1 = new GossipMessage(tokenId, "dev_A", "tx_1", System.currentTimeMillis(), 0);
+        GossipMessage m1 = new GossipMessage(tokenId, "dev_A", "tx_1", System.currentTimeMillis(), "sig_1", 0);
         store.addGossip(m1);
 
         // 2. sighting 2 (Double spend) via WiFi
-        GossipMessage m2 = new GossipMessage(tokenId, "dev_B", "tx_2", System.currentTimeMillis(), 0);
+        GossipMessage m2 = new GossipMessage(tokenId, "dev_B", "tx_2", System.currentTimeMillis(), "sig_2", 0);
         GossipStore.ConflictResult result = store.addGossip(m2);
 
         assertTrue("Conflict MUST be detected across different radio carriers", result.isConflict);

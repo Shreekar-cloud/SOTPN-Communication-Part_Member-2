@@ -38,13 +38,13 @@ public class ByzantineSequenceTest {
         String txId = "tx_legit";
         long now = System.currentTimeMillis();
 
-        // 1. Receive original message
-        GossipMessage msg1 = new GossipMessage(tokenId, senderId, txId, now, 0);
+        // 1. Receive original message (hardened 6-arg constructor)
+        GossipMessage msg1 = new GossipMessage(tokenId, senderId, txId, now, "sig_legit", 0);
         store.addGossip(msg1);
 
         // 2. Malicious peer re-broadcasts SAME TX with a "Future" timestamp
         // to try and trigger a false conflict or fill the store.
-        GossipMessage forgedMsg = new GossipMessage(tokenId, senderId, txId, now + 10000, 1);
+        GossipMessage forgedMsg = new GossipMessage(tokenId, senderId, txId, now + 10000, "sig_legit", 1);
         GossipStore.ConflictResult result = store.addGossip(forgedMsg);
 
         // A secure store must recognize this is the SAME TX and NOT flag a conflict.

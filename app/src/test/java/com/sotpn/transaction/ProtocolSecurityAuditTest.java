@@ -53,7 +53,8 @@ public class ProtocolSecurityAuditTest {
         assertEquals(TransactionPhase.DELAYING, tx.getPhase());
 
         // Simulate conflict arriving via Gossip
-        String maliciousGossip = "TOKEN_SEEN:tok_audit:dev_evil:tx_evil:" + System.currentTimeMillis() + ":0";
+        // Correct wire format: TOKEN_SEEN : tokenId : senderPubKey : txId : timestamp : signature : hopCount
+        String maliciousGossip = "TOKEN_SEEN:tok_audit:dev_evil:tx_evil:" + System.currentTimeMillis() + ":sig_evil:0";
         manager.onGossipReceived(maliciousGossip);
         
         // CRITICAL: Must idle looper to allow the internal handleConflict logic to run

@@ -108,9 +108,10 @@ public class RaceConditionTest {
             final int id = i;
             Executors.newCachedThreadPool().submit(() -> {
                 try {
+                    // Updated to 6-arg constructor: (tokenId, senderPubKey, txId, timestampMs, signature, hopCount)
                     store.addGossip(new com.sotpn.communication.GossipMessage(
                             "tok_concurrent", "device_" + id,
-                            "tx_" + id, System.currentTimeMillis(), 0));
+                            "tx_" + id, System.currentTimeMillis(), "sig_" + id, 0));
                 } finally {
                     latch.countDown();
                 }

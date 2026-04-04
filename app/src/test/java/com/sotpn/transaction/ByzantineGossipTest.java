@@ -17,9 +17,6 @@ import static org.mockito.Mockito.mock;
 
 /**
  * SOTPN - Secure Offline Token-Based Payment Network
- * Member 2: Communication + Transaction Engine
- *
- * BYZANTINE FAULT TOLERANCE TESTS
  */
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk = 28)
@@ -45,43 +42,27 @@ public class ByzantineGossipTest {
         );
     }
 
-    // -----------------------------------------------------------------------
-    // BYZANTINE 1: Hop Limit Exploitation
-    // A malicious peer sends a gossip message already at MAX_HOPS to 
-    // stop it from spreading to other peers.
-    // -----------------------------------------------------------------------
     @Test
     public void testByzantine_MaxHopGossip_isNotRelayed() {
-        // Create a message at hop limit (9)
-        GossipMessage maliciousMsg = new GossipMessage("tok_1", "attacker", "tx_1", System.currentTimeMillis(), 9);
+        // Updated to use 6-argument constructor
+        GossipMessage maliciousMsg = new GossipMessage("tok_1", "attacker", "tx_1", System.currentTimeMillis(), "sig_1", 9);
         
         engine.handleIncomingGossip(maliciousMsg.toWireString());
         
         assertTrue("Max hop gossip should be stored", store.hasSeenToken("tok_1"));
-        // Note: Relaying is usually verified via mock interactions, 
-        // but protocol-wise, isExpired() will be true.
         assertTrue(maliciousMsg.isExpired());
     }
 
-    // -----------------------------------------------------------------------
-    // BYZANTINE 2: Identity Spoofing
-    // Attacker sends gossip claiming to be "my_device". 
-    // Engine should ignore self-spoofed messages.
-    // -----------------------------------------------------------------------
     @Test
     public void testByzantine_SelfSpoofing_isIgnored() {
-        // Message claims to come from "my_device"
-        GossipMessage spoof = new GossipMessage("tok_spoof", "my_device", "tx_spoof", System.currentTimeMillis(), 0);
+        // Message claims to come from "my_device" (which is the device public key)
+        GossipMessage spoof = new GossipMessage("tok_spoof", "my_device", "tx_spoof", System.currentTimeMillis(), "sig_spoof", 0);
         
         engine.handleIncomingGossip(spoof.toWireString());
         
         assertFalse("Spoofed self-message should not be stored", store.hasSeenToken("tok_spoof"));
     }
 
-    // -----------------------------------------------------------------------
-    // BYZANTINE 3: Malformed Gossip Injection
-    // Attacker sends garbage data to crash the gossip parser.
-    // -----------------------------------------------------------------------
     @Test
     public void testByzantine_MalformedGossip_doesNotCrash() {
         try {

@@ -72,6 +72,7 @@ public class AdaptiveDelayHandler implements GossipEngine.GossipListener {
         gossipEngine.startBroadcasting(
                 transaction.getTokenId(),
                 transaction.getTxId(),
+                transaction.getSignature(),
                 delayMs
         );
 

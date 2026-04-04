@@ -38,10 +38,9 @@ public class ArchitecturalSafetyAuditTest {
         manager = new TransactionManager(context, wallet, listener);
     }
 
-    private void signTransaction(Transaction tx, String senderKey) {
+    private void signTransaction(Transaction tx, MockWallet signer) {
         String data = tx.getTokenId() + tx.getReceiverPublicKey() + tx.getTimestamp() + tx.getNonce();
-        // Mimic MockWallet signature format: sig:[signerPublicKey]:[dataHash]
-        tx.setSignature("sig:" + senderKey + ":" + data.hashCode());
+        tx.setSignature(signer.signTransaction(data));
     }
 
     // -----------------------------------------------------------------------
@@ -51,10 +50,10 @@ public class ArchitecturalSafetyAuditTest {
     // -----------------------------------------------------------------------
     @Test
     public void testAudit_GossipConflictDuringDelay_AbortsHappyPath() {
-        String senderKey = "sender_key";
-        Transaction tx = new Transaction("tx_audit", "tok_audit", senderKey, wallet.getPublicKey(), 
-                                         System.currentTimeMillis(), "n", "");
-        signTransaction(tx, senderKey);
+        MockWallet senderWallet = new MockWallet();
+        Transaction tx = new Transaction("tx_audit", "tok_audit", senderWallet.getPublicKey(), wallet.getPublicKey(), 
+                                         System.currentTimeMillis(), "n_audit", "");
+        signTransaction(tx, senderWallet);
         
         // Start incoming transaction (reaches Phase 3 DELAYING)
         manager.onTransactionReceived(tx);
@@ -65,11 +64,12 @@ public class ArchitecturalSafetyAuditTest {
         ShadowLooper.idleMainLooper(5, TimeUnit.SECONDS);
         
         // This triggers the handleConflict logic via public callback
-        manager.onGossipReceived("TOKEN_SEEN:tok_audit:dev_evil:tx_evil:" + System.currentTimeMillis() + ":0");
+        // Wire format: PREFIX : tokenId : senderPubKey : txId : timestamp : signature : hopCount
+        manager.onGossipReceived("TOKEN_SEEN:tok_audit:dev_evil:tx_evil:" + System.currentTimeMillis() + ":sig_evil:0");
         ShadowLooper.idleMainLooper();
 
         // Transaction must be dead
-        assertEquals(TransactionPhase.FAILED, tx.getPhase());
+        assertEquals("Transaction MUST be FAILED after mid-delay conflict", TransactionPhase.FAILED, tx.getPhase());
         
         // Happy path timer (the 10s delay) MUST NOT wake up and commit later
         ShadowLooper.idleMainLooper(6, TimeUnit.SECONDS);
@@ -84,12 +84,12 @@ public class ArchitecturalSafetyAuditTest {
     // -----------------------------------------------------------------------
     @Test
     public void testAudit_InterRadioCollision_IsTreatedAsFraud() {
-        String senderKey1 = "s1";
-        String senderKey2 = "s2";
-        Transaction tx1 = new Transaction("tx_1", "tok_race", senderKey1, wallet.getPublicKey(), System.currentTimeMillis(), "n1", "");
-        Transaction tx2 = new Transaction("tx_2", "tok_race", senderKey2, wallet.getPublicKey(), System.currentTimeMillis(), "n2", "");
-        signTransaction(tx1, senderKey1);
-        signTransaction(tx2, senderKey2);
+        MockWallet s1 = new MockWallet();
+        MockWallet s2 = new MockWallet();
+        Transaction tx1 = new Transaction("tx_1", "tok_race", s1.getPublicKey(), wallet.getPublicKey(), System.currentTimeMillis(), "n1", "");
+        Transaction tx2 = new Transaction("tx_2", "tok_race", s2.getPublicKey(), wallet.getPublicKey(), System.currentTimeMillis(), "n2", "");
+        signTransaction(tx1, s1);
+        signTransaction(tx2, s2);
 
         // 1. Receive via WiFi
         manager.onTransactionReceived(tx1);

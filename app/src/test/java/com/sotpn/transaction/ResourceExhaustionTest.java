@@ -64,7 +64,7 @@ public class ResourceExhaustionTest {
         GossipStore store = new GossipStore();
         
         for (int i = 0; i < 50000; i++) {
-            store.addGossip(new GossipMessage("tok_" + i, "dev_" + i, "tx_" + i, System.currentTimeMillis(), 0));
+            store.addGossip(new GossipMessage("tok_" + i, "dev_" + i, "tx_" + i, System.currentTimeMillis(), "sig_" + i, 0));
         }
 
         GossipStore.ConflictResult result = store.checkConflict("tok_999");

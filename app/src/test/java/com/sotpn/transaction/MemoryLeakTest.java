@@ -28,11 +28,11 @@ public class MemoryLeakTest {
         GossipStore store = new GossipStore();
         
         // 1. Add fresh gossip
-        store.addGossip(new GossipMessage("tok_fresh", "dev_1", "tx_1", System.currentTimeMillis(), 0));
+        store.addGossip(new GossipMessage("tok_fresh", "dev_1", "tx_1", System.currentTimeMillis(), "sig_fresh", 0));
         
         // 2. Add "old" gossip (simulated as 2 minutes old)
         long twoMinutesAgo = System.currentTimeMillis() - 120_000;
-        store.addGossip(new GossipMessage("tok_old", "dev_2", "tx_2", twoMinutesAgo, 0));
+        store.addGossip(new GossipMessage("tok_old", "dev_2", "tx_2", twoMinutesAgo, "sig_old", 0));
         
         assertEquals("Should initially have 2 tokens", 2, store.getTrackedTokenCount());
 

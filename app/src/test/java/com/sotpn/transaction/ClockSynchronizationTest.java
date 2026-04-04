@@ -53,7 +53,8 @@ public class ClockSynchronizationTest {
     @Test
     public void testDrift_FutureGossip_IsAccepted() {
         long futureTime = System.currentTimeMillis() + 4000; // 4s ahead
-        GossipMessage futureMsg = new GossipMessage("tok_1", "peer_ahead", "tx_1", futureTime, 0);
+        // Updated to use 6-argument constructor
+        GossipMessage futureMsg = new GossipMessage("tok_1", "peer_ahead", "tx_1", futureTime, "sig_future", 0);
         
         gossipStore.addGossip(futureMsg);
         

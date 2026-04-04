@@ -36,7 +36,7 @@ public class FinalHardeningAuditTest {
     // -----------------------------------------------------------------------
     @Test
     public void testHardening_ByzantineHop_DoesNotCauseRelayStorm() {
-        GossipMessage malicious = new GossipMessage("tok", "dev", "tx", System.currentTimeMillis(), -100);
+        GossipMessage malicious = new GossipMessage("tok", "dev", "tx", System.currentTimeMillis(), "sig_malicious", -100);
         
         // Re-calculate hop for relay
         int nextHop = malicious.getHopCount() + 1;
@@ -56,10 +56,10 @@ public class FinalHardeningAuditTest {
         String txId = "tx_shared";
         
         // Device A claims this TxId
-        store.addGossip(new GossipMessage(tokenId, "device_A", txId, System.currentTimeMillis(), 0));
+        store.addGossip(new GossipMessage(tokenId, "device_A", txId, System.currentTimeMillis(), "sig_A", 0));
         
         // Device B claims the SAME TxId (Spoofing/Forgery)
-        GossipStore.ConflictResult result = store.addGossip(new GossipMessage(tokenId, "device_B", txId, System.currentTimeMillis(), 0));
+        GossipStore.ConflictResult result = store.addGossip(new GossipMessage(tokenId, "device_B", txId, System.currentTimeMillis(), "sig_B", 0));
         
         assertTrue("Gossip Store MUST detect conflict if multiple devices claim the same TX", 
                    result.isConflict);
