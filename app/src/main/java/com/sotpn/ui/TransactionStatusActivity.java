@@ -43,7 +43,8 @@ public class TransactionStatusActivity extends AppCompatActivity {
     private TextView    tvRiskLevel;
     private TextView tvStatusMessage;
     private Button   btnCancelStatus;
-
+    private final android.os.Handler autoCloseHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    
     private MainViewModel viewModel;
 
     @Override
@@ -113,7 +114,7 @@ public class TransactionStatusActivity extends AppCompatActivity {
     private void setupCancelButton() {
         btnCancelStatus.setOnClickListener(v -> {
             viewModel.cancelTransaction();
-            finish();
+            returnToHome();
         });
     }
 
@@ -158,11 +159,13 @@ public class TransactionStatusActivity extends AppCompatActivity {
                 setIcon(iconPhase4, ICON_DONE, COLOR_DONE);
                 btnCancelStatus.setText("Done");
                 btnCancelStatus.setBackgroundColor(COLOR_DONE);
+                autoCloseHandler.postDelayed(this::returnToHome, 3000);
                 break;
 
             case FAILED:
                 setIcon(iconPhase1, ICON_FAILED, COLOR_FAILED);
                 btnCancelStatus.setText("Close");
+                autoCloseHandler.postDelayed(this::returnToHome, 8000);
                 break;
         }
     }
@@ -175,14 +178,14 @@ public class TransactionStatusActivity extends AppCompatActivity {
         tvStatusMessage.setTextColor(COLOR_DONE);
         btnCancelStatus.setText("Done");
         btnCancelStatus.setBackgroundColor(COLOR_DONE);
-        btnCancelStatus.setOnClickListener(v -> finish());
+        btnCancelStatus.setOnClickListener(v -> returnToHome());
     }
 
     private void showFailure(String reason) {
         tvStatusMessage.setText("Failed: " + reason);
         tvStatusMessage.setTextColor(COLOR_FAILED);
         btnCancelStatus.setText("Close");
-        btnCancelStatus.setOnClickListener(v -> finish());
+        btnCancelStatus.setOnClickListener(v -> returnToHome());
     }
 
     private void setIcon(TextView view, String icon, int color) {
@@ -200,5 +203,12 @@ public class TransactionStatusActivity extends AppCompatActivity {
             case HIGH:   return "High risk — few peers nearby";
             default:     return "";
         }
+    }
+
+    private void returnToHome() {
+        android.content.Intent intent = new android.content.Intent(this, com.sotpn.MainActivity.class);
+        intent.addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP | android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        startActivity(intent);
+        finish();
     }
 }

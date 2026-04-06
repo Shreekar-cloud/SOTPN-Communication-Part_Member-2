@@ -86,7 +86,7 @@ public class SendActivity extends AppCompatActivity {
 
     private void setupViewModel() {
         viewModel = new ViewModelProvider(this).get(MainViewModel.class);
-        viewModel.init(new SimpleWallet(this));
+        // viewModel.init() removed - handled by SotpnApp singleton
 
         // Observe nearby peers
         viewModel.getNearbyPeers().observe(this, peers -> {

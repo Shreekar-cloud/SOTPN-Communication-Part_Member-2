@@ -145,6 +145,16 @@ public class BleScanner {
                     ? result.getScanRecord().getDeviceName()
                     : null;
 
+            // SOTPN IMPROVEMENT: If name is missing (shrunken packet), parse ID from Manufacturer Data
+            if (name == null && result.getScanRecord() != null) {
+                byte[] manufData = result.getScanRecord().getManufacturerSpecificData(0xFFFF);
+                if (manufData != null && manufData.length >= 4) {
+                    // prefix "SOT" (3 bytes) + ID (>= 1 byte)
+                    String id = new String(manufData, 3, manufData.length - 3);
+                    name = BleConstants.DEVICE_NAME_PREFIX + id;
+                }
+            }
+
             boolean isNew = !discoveredDevices.containsKey(mac);
 
             BleDeviceInfo info = new BleDeviceInfo(

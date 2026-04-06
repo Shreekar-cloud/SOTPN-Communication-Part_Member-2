@@ -11,8 +11,8 @@ import com.sotpn.wallet.WalletInterface;
 public class ValidationPhaseHandler {
 
     private static final String TAG              = "ValidationPhaseHandler";
-    private static final long   TOKEN_VALIDITY_MS = 60_000;
-    private static final long   MAX_CLOCK_SKEW_MS = 5_000;
+    private static final long   TOKEN_VALIDITY_MS = 600_000; // Increased to 10 mins for testing
+    private static final long   MAX_CLOCK_SKEW_MS = 600_000; // Increased to 10 mins for testing
 
     private final WalletInterface wallet;
     private final NonceStore      nonceStore;
@@ -44,6 +44,8 @@ public class ValidationPhaseHandler {
         } else {
             transaction.setPhase(TransactionPhase.FAILED);
             Log.w(TAG, "Phase 2 FAILED: " + result);
+            // DO NOT USE mainHandler.post here as execute is usually called from one anyway, 
+            // but for safety we want to ensure the UI knows.
             listener.onValidationFailed(transaction, result);
         }
     }

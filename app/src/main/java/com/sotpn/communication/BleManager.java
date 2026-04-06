@@ -24,6 +24,7 @@ public class BleManager {
 
     private final BleAdvertiser  advertiser;
     private final BleScanner     scanner;
+    private final BleServer      server;
     private final BleDataTransfer dataTransfer;
 
     private String myDeviceId;
@@ -37,6 +38,7 @@ public class BleManager {
 
         this.advertiser   = new BleAdvertiser(adapter, context, callback);
         this.scanner      = new BleScanner(adapter, callback);
+        this.server       = new BleServer(context, callback);
         this.dataTransfer = new BleDataTransfer(context, callback);
     }
 
@@ -46,6 +48,7 @@ public class BleManager {
 
     public void startDiscovery(String deviceId) {
         this.myDeviceId = deviceId;
+        server.start();     // Start hosting the GATT server
         advertiser.startAdvertising(deviceId);
         scanner.startScan();
         Log.i(TAG, "BLE discovery started for device: " + deviceId);
@@ -54,6 +57,7 @@ public class BleManager {
     public void stopDiscovery() {
         advertiser.stopAdvertising();
         scanner.stopScan();
+        server.stop();      // Stop the GATT server
         Log.i(TAG, "BLE discovery stopped");
     }
 
@@ -76,7 +80,7 @@ public class BleManager {
     }
 
     public void sendAck(TransactionAck ack) {
-        dataTransfer.sendAck(ack);
+        server.sendAck(ack);
     }
 
     /**
@@ -85,9 +89,7 @@ public class BleManager {
      */
     public void broadcastGossip(String gossipWireString) {
         Log.d(TAG, "Broadcasting gossip payload: " + gossipWireString);
-        // In a full implementation, we iterate all active GATT connections.
-        // For now, we utilize the primary data transfer channel.
-        dataTransfer.sendGossip(gossipWireString);
+        server.sendGossip(gossipWireString);
     }
 
     public int getNearbyDeviceCount() {

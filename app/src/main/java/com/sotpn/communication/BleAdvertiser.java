@@ -84,10 +84,10 @@ public class BleAdvertiser {
 
         // --- Data: include SERVICE_UUID so scanners can filter SOTPN devices ---
         AdvertiseData data = new AdvertiseData.Builder()
-                .setIncludeDeviceName(true)    // Try including name for better visibility
-                .setIncludeTxPowerLevel(true)
+                .setIncludeDeviceName(false)   // REMOVED: Packet too large (31-byte limit)
+                .setIncludeTxPowerLevel(false) // REMOVED: Packet too large
                 .addServiceUuid(new ParcelUuid(BleConstants.SERVICE_UUID))
-                .addManufacturerData(0xFFFF,   // Use 0xFFFF (internal/testing) instead of 0x004C (Apple)
+                .addManufacturerData(0xFFFF,   // SOTPN ID
                         buildManufacturerPayload(deviceId))
                 .build();
 
@@ -122,7 +122,7 @@ public class BleAdvertiser {
         Log.d(TAG, "Building manufacturer payload for deviceId: " + deviceId);
         byte[] prefix = {0x53, 0x4F, 0x54}; // "SOT"
         byte[] idBytes = deviceId.getBytes();
-        int idLen = Math.min(idBytes.length, 24); // BLE ad packet is limited
+        int idLen = Math.min(idBytes.length, 3); // CRITICAL: Truncated to 3 chars to fit 31-byte limit (including flags)
         byte[] payload = new byte[prefix.length + idLen];
         System.arraycopy(prefix, 0, payload, 0, prefix.length);
         System.arraycopy(idBytes, 0, payload, prefix.length, idLen);

@@ -11,6 +11,7 @@ import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
+import android.widget.Toast;
 
 import com.sotpn.model.Transaction;
 import com.sotpn.model.TransactionAck;
@@ -33,12 +34,18 @@ public class BleDataTransfer {
     private final BleCallback  callback;
     private final Handler      mainHandler;
 
-    private BluetoothGatt      gatt;
+    private volatile BluetoothGatt      gatt;
+    private volatile BluetoothGattService cachedService;
+    private volatile BluetoothGattCharacteristic cachedTxChar;
     private int                currentMtu = BleConstants.DEFAULT_CHUNK_SIZE;
 
     private final Queue<byte[]> sendQueue   = new LinkedList<>();
     private       boolean       isSending   = false;
     private       String        sendingTxId = null;
+    private       Transaction   pendingTransaction = null;
+    private       Runnable      sendWatchdogRunnable = null;
+    private       int           totalChunksToSend = 0;
+    private       int           chunksSentCount = 0;
 
     private       byte[]        receiveBuffer = new byte[0];
 
@@ -60,6 +67,13 @@ public class BleDataTransfer {
     }
 
     public void sendTransaction(Transaction tx) {
+        if (cachedTxChar == null) {
+            Log.i(TAG, "Queueing transaction: SOTPN service not discovered yet");
+            pendingTransaction = tx;
+            Toast.makeText(context, "SOTPN: Waiting for peer to initialize...", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        
         sendingTxId = tx.getTxId();
         try {
             String json = tx.toJson().toString();
@@ -67,7 +81,7 @@ public class BleDataTransfer {
                     BleConstants.TX_CHARACTERISTIC_UUID.toString());
         } catch (Exception e) {
             Log.e(TAG, "Failed to serialise transaction", e);
-            callback.onTransactionSendFailed(tx.getTxId(), e.getMessage());
+            if (callback != null) callback.onTransactionSendFailed(tx.getTxId(), e.getMessage());
         }
     }
 
@@ -78,7 +92,7 @@ public class BleDataTransfer {
                     BleConstants.ACK_CHARACTERISTIC_UUID.toString());
         } catch (Exception e) {
             Log.e(TAG, "Failed to serialise ACK", e);
-            callback.onAckSendFailed(ack.getTxId(), e.getMessage());
+            if (callback != null) callback.onAckSendFailed(ack.getTxId(), e.getMessage());
         }
     }
 
@@ -113,9 +127,33 @@ public class BleDataTransfer {
                 sendQueue.add(chunk);
             }
         }
-
+        
+        totalChunksToSend = sendQueue.size();
+        chunksSentCount = 0;
+        
         if (!isSending) {
             writeNextChunk();
+        }
+    }
+
+    private void enableNotifications(BluetoothGatt g) {
+        BluetoothGattService service = g.getService(BleConstants.SERVICE_UUID);
+        if (service == null) return;
+
+        BluetoothGattCharacteristic ackChar = service.getCharacteristic(BleConstants.ACK_CHARACTERISTIC_UUID);
+        if (ackChar != null) {
+            g.setCharacteristicNotification(ackChar, true);
+            BluetoothGattDescriptor descriptor = ackChar.getDescriptor(BleConstants.CCCD_UUID);
+            if (descriptor != null) {
+                descriptor.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
+                g.writeDescriptor(descriptor);
+                Log.d(TAG, "Subscribed to ACK notifications");
+            }
+        }
+
+        BluetoothGattCharacteristic gossipChar = service.getCharacteristic(BleConstants.GOSSIP_CHARACTERISTIC_UUID);
+        if (gossipChar != null) {
+            g.setCharacteristicNotification(gossipChar, true);
         }
     }
 
@@ -124,7 +162,9 @@ public class BleDataTransfer {
             isSending = false;
             final String txId = sendingTxId;
             if (txId != null) {
-                mainHandler.post(() -> callback.onTransactionSent(txId));
+                mainHandler.post(() -> {
+                    if (callback != null) callback.onTransactionSent(txId);
+                });
             }
             sendingTxId = null;
             return;
@@ -133,22 +173,55 @@ public class BleDataTransfer {
         isSending = true;
         byte[] chunk = sendQueue.poll();
 
-        BluetoothGattService service = gatt.getService(BleConstants.SERVICE_UUID);
-        if (service == null) {
-            callback.onBleError("SOTPN service not found");
+        if (cachedTxChar == null) {
+            if (callback != null) callback.onBleError("SOTPN service not initialized");
             return;
         }
 
-        BluetoothGattCharacteristic characteristic =
-                service.getCharacteristic(BleConstants.TX_CHARACTERISTIC_UUID);
-        if (characteristic == null) {
-            callback.onBleError("TX characteristic not found");
-            return;
-        }
+        BluetoothGattCharacteristic characteristic = cachedTxChar;
 
         characteristic.setValue(chunk);
+        // Switch back to DEFAULT (With-Response) for guaranteed hardware delivery
         characteristic.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT);
-        gatt.writeCharacteristic(characteristic);
+        
+        if (gatt == null) {
+            isSending = false;
+            return;
+        }
+        
+        boolean started = gatt.writeCharacteristic(characteristic);
+        if (!started) {
+            Log.e(TAG, "GATT write failed (radio busy). Retrying in 250ms...");
+            ((java.util.LinkedList<byte[]>)sendQueue).addFirst(chunk);
+            mainHandler.postDelayed(() -> writeNextChunk(), 250);
+            return;
+        }
+        
+        startSendWatchdog(chunk);
+        chunksSentCount++;
+        
+        Log.d(TAG, "Writing chunk (" + chunk.length + " bytes) to characteristic. Count: " + chunksSentCount + "/" + totalChunksToSend);
+
+        final int currentCount = chunksSentCount;
+        final int totalCount = totalChunksToSend;
+        mainHandler.post(() -> Toast.makeText(context, "SOTPN: Sending chunk " + currentCount + " of " + totalCount, Toast.LENGTH_SHORT).show());
+    }
+
+    private void startSendWatchdog(byte[] currentChunk) {
+        cancelSendWatchdog();
+        sendWatchdogRunnable = () -> {
+            Log.w(TAG, "Send watchdog fired! No ACK for chunk. Retrying current chunk...");
+            ((java.util.LinkedList<byte[]>)sendQueue).addFirst(currentChunk);
+            writeNextChunk();
+        };
+        mainHandler.postDelayed(sendWatchdogRunnable, 2000);
+    }
+
+    private void cancelSendWatchdog() {
+        if (sendWatchdogRunnable != null) {
+            mainHandler.removeCallbacks(sendWatchdogRunnable);
+            sendWatchdogRunnable = null;
+        }
     }
 
     private void handleIncomingChunk(byte[] chunk, String fromMac) {
@@ -186,23 +259,31 @@ public class BleDataTransfer {
             
             if (!json.trim().startsWith("{")) {
                 // Treat as gossip (plain string)
-                mainHandler.post(() -> callback.onGossipReceived(json, fromMac));
+                mainHandler.post(() -> {
+                    if (callback != null) callback.onGossipReceived(json, fromMac);
+                });
                 return;
             }
 
             JSONObject obj = new JSONObject(json);
 
-            if (obj.has("status")) {
+            if (obj.has("ack_signature")) {
                 // It's a TransactionAck
                 TransactionAck ack = TransactionAck.fromJson(obj);
-                mainHandler.post(() -> callback.onAckReceived(ack));
-            } else if (obj.has("tokenId")) {
+                mainHandler.post(() -> {
+                    if (callback != null) callback.onAckReceived(ack);
+                });
+            } else if (obj.has("sender")) {
                 // It's a Transaction
                 Transaction tx = Transaction.fromJson(obj);
-                mainHandler.post(() -> callback.onTransactionReceived(tx, fromMac));
+                mainHandler.post(() -> {
+                    if (callback != null) callback.onTransactionReceived(tx, fromMac);
+                });
             } else {
                 // Fallback to gossip
-                mainHandler.post(() -> callback.onGossipReceived(json, fromMac));
+                mainHandler.post(() -> {
+                    if (callback != null) callback.onGossipReceived(json, fromMac);
+                });
             }
 
         } catch (Exception e) {
@@ -226,40 +307,81 @@ public class BleDataTransfer {
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 String mac = g.getDevice().getAddress();
                 g.close();
-                mainHandler.post(() -> callback.onDisconnected(mac, "Disconnected"));
+                mainHandler.post(() -> {
+                    if (callback != null) callback.onDisconnected(mac, "Disconnected");
+                });
             }
         }
 
         @Override
         public void onMtuChanged(BluetoothGatt g, int mtu, int status) {
             if (status == BluetoothGatt.GATT_SUCCESS) {
-                currentMtu = mtu - BleConstants.ATT_OVERHEAD;
+                currentMtu = Math.min(mtu, 60); // INDESTRUCTIBLE MTU: 60
+                Log.i(TAG, "MTU Negotiated: " + mtu + ". Using safe cap: " + currentMtu);
             } else {
                 currentMtu = BleConstants.DEFAULT_CHUNK_SIZE;
             }
-            g.discoverServices();
+            
+            // DELAY BEFORE DISCOVERY: Some phones need time to settle the MTU
+            mainHandler.postDelayed(() -> g.discoverServices(), 600);
         }
+
+        private int discoveryRetryCount = 0;
 
         @Override
         public void onServicesDiscovered(BluetoothGatt g, int status) {
             if (status == BluetoothGatt.GATT_SUCCESS) {
+                cachedService = g.getService(BleConstants.SERVICE_UUID);
+                if (cachedService == null) {
+                    if (discoveryRetryCount < 5) {
+                        discoveryRetryCount++;
+                        Log.w(TAG, "SOTPN Service not found, retrying discovery (" + discoveryRetryCount + ")...");
+                        mainHandler.postDelayed(() -> g.discoverServices(), 2000);
+                        return;
+                    }
+                    Log.e(TAG, "SOTPN Service not found after retries");
+                    if (callback != null) callback.onBleError("SOTPN Service not found");
+                    return;
+                }
+
+                cachedTxChar = cachedService.getCharacteristic(BleConstants.TX_CHARACTERISTIC_UUID);
+                if (cachedTxChar == null) {
+                    if (callback != null) callback.onBleError("TX characteristic not found");
+                    return;
+                }
+
+                discoveryRetryCount = 0;
+                Log.d(TAG, "Services discovered and cached. Enabling notifications...");
+                enableNotifications(g);
                 String mac = g.getDevice().getAddress();
-                mainHandler.post(() -> callback.onConnected(mac, currentMtu));
+                mainHandler.post(() -> {
+                    Toast.makeText(context, "SOTPN Service Initialized", Toast.LENGTH_SHORT).show();
+                    if (pendingTransaction != null) {
+                        Log.i(TAG, "Triggering queued transaction after discovery");
+                        sendTransaction(pendingTransaction);
+                        pendingTransaction = null;
+                    }
+                    if (callback != null) callback.onConnected(mac, currentMtu);
+                });
             } else {
-                callback.onBleError("Service discovery failed");
+                if (callback != null) callback.onBleError("Service discovery failed");
             }
         }
 
         @Override
         public void onCharacteristicWrite(BluetoothGatt g,
                                           BluetoothGattCharacteristic characteristic, int status) {
+            cancelSendWatchdog();
             if (status == BluetoothGatt.GATT_SUCCESS) {
-                writeNextChunk();
+                // INCREASED BREATHER: 150ms for radio stability
+                mainHandler.postDelayed(() -> writeNextChunk(), 150);
             } else {
-                isSending = false;
-                if (sendingTxId != null) {
-                    callback.onTransactionSendFailed(sendingTxId, "GATT write error");
-                }
+                Log.e(TAG, "GATT write failed with status: " + status);
+                final int finalStatus = status;
+                mainHandler.post(() -> android.widget.Toast.makeText(context, "SOTPN: Packet Error " + finalStatus, android.widget.Toast.LENGTH_LONG).show());
+                
+                // Retry the same chunk after a 200ms breather instead of failing
+                mainHandler.postDelayed(() -> writeNextChunk(), 200);
             }
         }
 
@@ -273,6 +395,8 @@ public class BleDataTransfer {
 
         @Override
         public void onDescriptorWrite(BluetoothGatt g, BluetoothGattDescriptor descriptor,
-                                      int status) {}
+                                      int status) {
+            Log.d(TAG, "Descriptor write status: " + status);
+        }
     };
 }

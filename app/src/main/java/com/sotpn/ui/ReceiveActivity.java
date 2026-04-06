@@ -86,7 +86,7 @@ public class ReceiveActivity extends AppCompatActivity {
 
     private void setupViewModel() {
         viewModel = new ViewModelProvider(this).get(MainViewModel.class);
-        viewModel.init(new SimpleWallet(this));
+        // viewModel.init() removed - handled by SotpnApp singleton
 
         tvDeviceId.setText("Advertising as SOTPN device\nBluetooth: enabled");
 
@@ -107,6 +107,12 @@ public class ReceiveActivity extends AppCompatActivity {
             if (error != null) {
                 Toast.makeText(this, error, Toast.LENGTH_LONG).show();
                 resetToWaiting();
+            }
+        });
+
+        viewModel.getIsPeerConnected().observe(this, connected -> {
+            if (connected) {
+                Toast.makeText(this, "Sender connected - awaiting data...", Toast.LENGTH_SHORT).show();
             }
         });
 

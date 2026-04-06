@@ -8,6 +8,7 @@ import androidx.lifecycle.AndroidViewModel;
 import androidx.lifecycle.LiveData;
 import androidx.lifecycle.MutableLiveData;
 
+import com.sotpn.SotpnApp;
 import com.sotpn.communication.BleDeviceInfo;
 import com.sotpn.communication.GossipStore;
 import com.sotpn.model.TransactionPhase;
@@ -74,13 +75,15 @@ public class MainViewModel extends AndroidViewModel
     public MainViewModel(@NonNull Application application) {
         super(application);
         Log.i(TAG, "MainViewModel created");
-    }
+        
+        // Get the global singleton transaction manager
+        SotpnApp app = (SotpnApp) application;
+        this.transactionManager = app.getTransactionManager(this);
 
-    public void init(WalletInterface wallet) {
-        if (transactionManager == null) {
-            transactionManager = new TransactionManager(
-                    getApplication(), wallet, this);
-            Log.i(TAG, "TransactionManager initialized");
+        // Sync with ongoing transaction if any
+        if (transactionManager != null) {
+            currentPhase.setValue(transactionManager.getCurrentPhase());
+            statusMessage.setValue(transactionManager.getCurrentStatusMessage());
         }
     }
 

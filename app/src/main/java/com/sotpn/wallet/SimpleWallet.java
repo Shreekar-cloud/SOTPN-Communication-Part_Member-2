@@ -26,6 +26,7 @@ public class SimpleWallet implements WalletInterface {
 
     private static final String TAG = "SimpleWallet";
     private static final String PREF_NAME = "sotpn_simple_wallet";
+    private static final String KEY_PRIV_KEY = "wallet_private_key";
     private static final String KEY_PUB_KEY = "wallet_public_key";
 
     private final SharedPreferences prefs;
@@ -45,33 +46,57 @@ public class SimpleWallet implements WalletInterface {
     private void initializeKeys() {
         try {
             publicKeyBase64 = prefs.getString(KEY_PUB_KEY, null);
-            if (publicKeyBase64 == null) {
+            String privateKeyBase64 = prefs.getString(KEY_PRIV_KEY, null);
+
+            if (publicKeyBase64 == null || privateKeyBase64 == null) {
                 KeyPairGenerator kpg = KeyPairGenerator.getInstance("RSA");
                 kpg.initialize(2048);
                 keyPair = kpg.generateKeyPair();
+                
                 publicKeyBase64 = Base64.encodeToString(keyPair.getPublic().getEncoded(), Base64.NO_WRAP);
-                prefs.edit().putString(KEY_PUB_KEY, publicKeyBase64).apply();
-                Log.i(TAG, "Generated new wallet keys");
+                String privKeyStr = Base64.encodeToString(keyPair.getPrivate().getEncoded(), Base64.NO_WRAP);
+                
+                prefs.edit()
+                    .putString(KEY_PUB_KEY, publicKeyBase64)
+                    .putString(KEY_PRIV_KEY, privKeyStr)
+                    .apply();
+                Log.i(TAG, "Generated new persistent wallet keys");
             } else {
-                // For simplicity, we regenerate or handle as needed. 
-                // Actual signing will need the private key which isn't in prefs.
-                KeyPairGenerator kpg = KeyPairGenerator.getInstance("RSA");
-                kpg.initialize(2048);
-                keyPair = kpg.generateKeyPair(); 
-                Log.i(TAG, "Initialized wallet with public key: " + publicKeyBase64.substring(0, 10) + "...");
+                // Restore existing keys
+                java.security.KeyFactory kf = java.security.KeyFactory.getInstance("RSA");
+                byte[] pubBytes = Base64.decode(publicKeyBase64, Base64.DEFAULT);
+                byte[] privBytes = Base64.decode(privateKeyBase64, Base64.DEFAULT);
+                
+                PublicKey pub = kf.generatePublic(new java.security.spec.X509EncodedKeySpec(pubBytes));
+                PrivateKey priv = kf.generatePrivate(new java.security.spec.PKCS8EncodedKeySpec(privBytes));
+                
+                keyPair = new KeyPair(pub, priv);
+                Log.i(TAG, "Restored persistent wallet keys: " + publicKeyBase64.substring(0, 10) + "...");
             }
         } catch (Exception e) {
             Log.e(TAG, "Key initialization failed", e);
-            publicKeyBase64 = "DUMMY_KEY_" + UUID.randomUUID().toString();
+            // Fallback to avoid null
+            try {
+                KeyPairGenerator kpg = KeyPairGenerator.getInstance("RSA");
+                kpg.initialize(1024);
+                keyPair = kpg.generateKeyPair();
+                publicKeyBase64 = Base64.encodeToString(keyPair.getPublic().getEncoded(), Base64.NO_WRAP);
+            } catch (Exception ignored) {}
         }
     }
 
     private void generateInitialTokens() {
-        // Give the wallet 10 tokens of 1000 paise (₹10 each)
         long expiry = System.currentTimeMillis() + (24 * 60 * 60 * 1000); // 24 hours
-        for (int i = 0; i < 10; i++) {
-            tokens.add(new TokenInfo("TOKEN_" + i, 1000, expiry));
+        // Small tokens
+        for (int i = 0; i < 5; i++) {
+            tokens.add(new TokenInfo("TOKEN_10_" + i, 1000, expiry));   // ₹10
         }
+        // Medium tokens
+        for (int i = 0; i < 5; i++) {
+            tokens.add(new TokenInfo("TOKEN_100_" + i, 10000, expiry)); // ₹100
+        }
+        // One Big token for large tests
+        tokens.add(new TokenInfo("TOKEN_1000", 100000, expiry));        // ₹1000
     }
 
     @Override
