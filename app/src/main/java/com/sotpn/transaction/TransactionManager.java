@@ -97,7 +97,12 @@ public class TransactionManager implements BleCallback, WifiDirectCallback {
     }
 
     public void startDiscovery() {
-        String deviceId = wallet.getPublicKey().substring(0, 8);
+        String publicKey = wallet.getPublicKey();
+        String deviceId = (publicKey != null && publicKey.length() >= 8) 
+                ? publicKey.substring(0, 8) 
+                : "UNKNOWN";
+        
+        Log.i(TAG, "Starting discovery for deviceId: " + deviceId);
         bleManager.startDiscovery(deviceId);
         wifiManager.discoverPeers();
     }

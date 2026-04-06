@@ -95,10 +95,10 @@ public class BleScanner {
 
         leScanner.startScan(filters, settings, scanCallback);
         isScanning = true;
-        Log.d(TAG, "BLE scan started");
+        Log.i(TAG, "BLE scan started with filter for SERVICE_UUID: " + BleConstants.SERVICE_UUID);
 
-        // Auto-stop after SCAN_DURATION_MS
-        mainHandler.postDelayed(this::stopScan, BleConstants.SCAN_DURATION_MS);
+        // Auto-stop removed to ensure discovery continues while screen is open.
+        // mainHandler.postDelayed(this::stopScan, BleConstants.SCAN_DURATION_MS);
     }
 
     /**
@@ -156,8 +156,10 @@ public class BleScanner {
             discoveredDevices.put(mac, info);
 
             if (isNew) {
-                Log.d(TAG, "New SOTPN device: " + info);
+                Log.i(TAG, "FOUND SOTPN PEER! Device: " + info.getDeviceName() + " [" + mac + "] RSSI: " + rssi);
                 mainHandler.post(() -> callback.onDeviceDiscovered(info));
+            } else {
+                Log.v(TAG, "Periodic scan update for " + mac + " RSSI: " + rssi);
             }
         }
 

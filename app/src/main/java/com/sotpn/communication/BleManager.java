@@ -35,7 +35,7 @@ public class BleManager {
         BluetoothManager bm = (BluetoothManager) context.getSystemService(Context.BLUETOOTH_SERVICE);
         this.adapter = (bm != null) ? bm.getAdapter() : null;
 
-        this.advertiser   = new BleAdvertiser(adapter, callback);
+        this.advertiser   = new BleAdvertiser(adapter, context, callback);
         this.scanner      = new BleScanner(adapter, callback);
         this.dataTransfer = new BleDataTransfer(context, callback);
     }

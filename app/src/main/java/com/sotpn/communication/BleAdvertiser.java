@@ -1,12 +1,18 @@
 package com.sotpn.communication;
 
+import android.Manifest;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.le.AdvertiseCallback;
 import android.bluetooth.le.AdvertiseData;
 import android.bluetooth.le.AdvertiseSettings;
 import android.bluetooth.le.BluetoothLeAdvertiser;
+import android.content.Context;
+import android.content.pm.PackageManager;
+import android.os.Build;
 import android.os.ParcelUuid;
 import android.util.Log;
+
+import androidx.core.app.ActivityCompat;
 
 /**
  * Broadcasts this device as a discoverable SOTPN node via BLE advertising.
@@ -24,12 +30,14 @@ public class BleAdvertiser {
     private static final String TAG = "BleAdvertiser";
 
     private final BluetoothAdapter  adapter;
+    private final Context           context;
     private final BleCallback        callback;
     private BluetoothLeAdvertiser    advertiser;
     private boolean                  isAdvertising = false;
 
-    public BleAdvertiser(BluetoothAdapter adapter, BleCallback callback) {
+    public BleAdvertiser(BluetoothAdapter adapter, Context context, BleCallback callback) {
         this.adapter  = adapter;
+        this.context  = context;
         this.callback = callback;
     }
 
@@ -55,8 +63,15 @@ public class BleAdvertiser {
 
         advertiser = adapter.getBluetoothLeAdvertiser();
         if (advertiser == null) {
+            Log.e(TAG, "FAILED: BluetoothLeAdvertiser is null. BLE Advertising not supported or Bluetooth OFF.");
             callback.onBleError("Device does not support BLE advertising");
             return;
+        }
+
+        // Set the adapter name so scanners can see "SOTPN_xxxx" even if packet parsing fails
+        String adName = BleConstants.DEVICE_NAME_PREFIX + deviceId;
+        if (ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            adapter.setName(adName);
         }
 
         // --- Settings: low latency for fast peer discovery during a transaction ---
@@ -69,8 +84,8 @@ public class BleAdvertiser {
 
         // --- Data: include SERVICE_UUID so scanners can filter SOTPN devices ---
         AdvertiseData data = new AdvertiseData.Builder()
-                .setIncludeDeviceName(false)   // keep packet small; we embed ID in manufacturer data
-                .setIncludeTxPowerLevel(false)
+                .setIncludeDeviceName(true)    // Try including name for better visibility
+                .setIncludeTxPowerLevel(true)
                 .addServiceUuid(new ParcelUuid(BleConstants.SERVICE_UUID))
                 .addManufacturerData(0x004C,   // arbitrary manufacturer ID
                         buildManufacturerPayload(deviceId))
