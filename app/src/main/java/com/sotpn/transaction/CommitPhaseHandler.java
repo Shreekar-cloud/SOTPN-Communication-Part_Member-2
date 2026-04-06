@@ -75,6 +75,9 @@ public class CommitPhaseHandler {
                 true
         );
 
+        // SOTPN ATOMICITY FIX: 
+        // We MUST attempt to send the ACK BEFORE crediting the wallet.
+        // If the radio fails here, the transaction is safely aborted and funds remain with sender.
         try {
             if (useBle && bleManager != null) {
                 bleManager.sendAck(ack);
