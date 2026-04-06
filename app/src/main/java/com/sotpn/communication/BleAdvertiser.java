@@ -87,7 +87,7 @@ public class BleAdvertiser {
                 .setIncludeDeviceName(true)    // Try including name for better visibility
                 .setIncludeTxPowerLevel(true)
                 .addServiceUuid(new ParcelUuid(BleConstants.SERVICE_UUID))
-                .addManufacturerData(0x004C,   // arbitrary manufacturer ID
+                .addManufacturerData(0xFFFF,   // Use 0xFFFF (internal/testing) instead of 0x004C (Apple)
                         buildManufacturerPayload(deviceId))
                 .build();
 
@@ -119,6 +119,7 @@ public class BleAdvertiser {
      *          S     O     T    (SOTPN prefix)
      */
     private byte[] buildManufacturerPayload(String deviceId) {
+        Log.d(TAG, "Building manufacturer payload for deviceId: " + deviceId);
         byte[] prefix = {0x53, 0x4F, 0x54}; // "SOT"
         byte[] idBytes = deviceId.getBytes();
         int idLen = Math.min(idBytes.length, 24); // BLE ad packet is limited

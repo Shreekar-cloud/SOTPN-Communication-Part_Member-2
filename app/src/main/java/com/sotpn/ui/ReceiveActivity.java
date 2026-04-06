@@ -15,6 +15,7 @@ import androidx.lifecycle.ViewModelProvider;
 import com.sotpn.R;
 import com.sotpn.communication.WifiDirectBroadcastReceiver;
 import com.sotpn.model.TransactionPhase;
+import com.sotpn.wallet.SimpleWallet;
 
 /**
  * SOTPN - Secure Offline Token-Based Payment Network
@@ -85,6 +86,7 @@ public class ReceiveActivity extends AppCompatActivity {
 
     private void setupViewModel() {
         viewModel = new ViewModelProvider(this).get(MainViewModel.class);
+        viewModel.init(new SimpleWallet(this));
 
         tvDeviceId.setText("Advertising as SOTPN device\nBluetooth: enabled");
 

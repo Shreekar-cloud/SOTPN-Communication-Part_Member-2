@@ -17,6 +17,7 @@ import androidx.lifecycle.ViewModelProvider;
 
 import com.sotpn.R;
 import com.sotpn.communication.BleDeviceInfo;
+import com.sotpn.wallet.SimpleWallet;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -85,6 +86,7 @@ public class SendActivity extends AppCompatActivity {
 
     private void setupViewModel() {
         viewModel = new ViewModelProvider(this).get(MainViewModel.class);
+        viewModel.init(new SimpleWallet(this));
 
         // Observe nearby peers
         viewModel.getNearbyPeers().observe(this, peers -> {
